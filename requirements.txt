@@ -1,0 +1,7 @@
+duckdb==1.5.5
+pyarrow==25.0.1
+pandas==3.0.6
+numpy==2.5.3
+huggingface_hub==1.32.0
+pytest
+PyYAML

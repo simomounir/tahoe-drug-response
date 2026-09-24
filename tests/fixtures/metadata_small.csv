@@ -1,0 +1,13 @@
+cell_line,drug,drugname_drugconc,plate,sample,n_cells
+CVCL_0546,Adagrasib,"[('Adagrasib', 0.05, 'uM')]",plate1,smp_a,120
+CVCL_0546,Adagrasib,"[('Adagrasib', 0.05, 'uM')]",plate1,smp_b,130
+CVCL_0546,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate1,smp_c,150
+CVCL_0546,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate1,smp_d,160
+CVCL_0459,Adagrasib,"[('Adagrasib', 0.05, 'uM')]",plate1,smp_e,110
+CVCL_0459,Adagrasib,"[('Adagrasib', 0.05, 'uM')]",plate1,smp_f,120
+CVCL_0459,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate1,smp_g,140
+CVCL_0459,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate1,smp_h,150
+CVCL_0480,Binimetinib,"[('Binimetinib', 5.0, 'uM')]",plate2,smp_i,90
+CVCL_0480,Binimetinib,"[('Binimetinib', 5.0, 'uM')]",plate2,smp_j,100
+CVCL_0480,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate2,smp_k,130
+CVCL_0480,DMSO_TF,"[('DMSO_TF', 0.0, 'uM')]",plate2,smp_l,140

@@ -1,0 +1,21 @@
+# Data is never committed (phase1.md §10): raw shards, caches, partials, outputs.
+data/
+
+# Generated reports; only a hand-picked example is committed.
+reports/*
+!reports/example_*.md
+
+# Scratch outputs and throwaway scripts.
+tmp/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
