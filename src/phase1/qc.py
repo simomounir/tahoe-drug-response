@@ -110,6 +110,15 @@ def render_qc_report(summary: dict) -> str:
     lines += [f"- WARNING: {w}" for w in summary.get("warnings", [])]
     if "n_logfc_conditions" in summary:
         lines.append(f"Treated conditions with logFC vs plate-matched DMSO: {summary['n_logfc_conditions']}")
+    gene_coverage = summary.get("gene_coverage")
+    if gene_coverage is not None:
+        if gene_coverage.get("skipped"):
+            lines.append("Zero-count genes: skipped (genes.parquet not found)")
+        else:
+            sample = gene_coverage.get("zero_count_gene_sample", [])
+            lines.append(f"Zero-count genes across the slice: {gene_coverage.get('n_zero_count_genes', 0)}")
+            if sample:
+                lines.append(f"Zero-count gene sample: {', '.join(sample)}")
     for title, table in summary.get("tables", {}).items():
         lines += ["", f"## {title}", "", _markdown_table(table) if len(table) else "none"]
     return "\n".join(lines)

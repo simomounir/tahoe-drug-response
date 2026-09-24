@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from phase1.build import build_outputs
+from phase1.config import load_slice_config
 from phase1.contracts import ContractError
 from phase1.stream import aggregate_shard, connect
 
 CONFIG = {
     "selected_cell_lines": ["L1", "L2"],
+    "cell_line_info": {
+        "L1": {"depmap_id": "ACH-000001", "tissue": "Lung"},
+        "L2": {"depmap_id": "ACH-000002", "tissue": "Bowel"},
+    },
     "min_cells_per_condition": 1,
     "min_control_cells": 1,
     "control_drugs": ["DMSO_TF"],
 }
+SLICE_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "slice.yaml"
 
 
 def _metadata(include_l2_control: bool = True) -> pd.DataFrame:
@@ -47,18 +54,18 @@ SHARDS = [
 ]
 
 
-def _run(tmp_path, metadata):
+def _run(tmp_path, metadata, config=CONFIG):
     con = connect(temp_dir=tmp_path)
     gene_files, cell_files = [], []
     for i, shard in enumerate(SHARDS):
         path = tmp_path / f"shard{i}.parquet"
         shard.to_parquet(path)
         g, c = tmp_path / f"p{i}_genes.parquet", tmp_path / f"p{i}_cells.parquet"
-        aggregate_shard(con, path, CONFIG["selected_cell_lines"], ["plate3"], g, c)
+        aggregate_shard(con, path, config["selected_cell_lines"], ["plate3"], g, c)
         gene_files.append(g)
         cell_files.append(c)
     out = tmp_path / "out"
-    result = build_outputs(con, gene_files, cell_files, metadata, CONFIG, out, tmp_path / "qc.md")
+    result = build_outputs(con, gene_files, cell_files, metadata, config, out, tmp_path / "qc.md")
     return result, out
 
 
@@ -67,6 +74,7 @@ def test_build_outputs_writes_validated_logfc_against_plate_matched_dmso(tmp_pat
 
     conditions = pd.read_parquet(out / "conditions.parquet")
     assert conditions["qc_pass"].all()
+    assert conditions.groupby("cell_line")["depmap_id"].first().to_dict() == {"L1": "ACH-000001", "L2": "ACH-000002"}
     assert result["summary"]["n_logfc_conditions"] == 2
     assert len(pd.read_parquet(out / "controls.parquet")) == 2
 
@@ -83,3 +91,17 @@ def test_build_outputs_writes_validated_logfc_against_plate_matched_dmso(tmp_pat
 def test_build_outputs_fails_when_a_treated_condition_has_no_control(tmp_path):
     with pytest.raises(ContractError, match="no control"):
         _run(tmp_path, _metadata(include_l2_control=False))
+
+
+def test_build_outputs_fails_when_a_cell_line_has_no_depmap_id(tmp_path):
+    config = {**CONFIG, "cell_line_info": {"L1": CONFIG["cell_line_info"]["L1"], "L2": {"tissue": "Bowel"}}}
+    with pytest.raises(ContractError, match=r"without depmap_id: \['L2'\]"):
+        _run(tmp_path, _metadata(), config)
+
+
+def test_slice_config_has_depmap_id_and_tissue_for_every_selected_line():
+    config = load_slice_config(SLICE_CONFIG)
+    info = config["cell_line_info"]
+    for line in config["selected_cell_lines"]:
+        assert info[line]["depmap_id"].startswith("ACH-"), line
+        assert info[line]["tissue"], line

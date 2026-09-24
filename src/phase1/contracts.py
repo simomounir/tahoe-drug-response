@@ -30,7 +30,7 @@ LOGFC_SCHEMA = {
     "cpm_control": "DOUBLE",
     "logfc": "DOUBLE",
 }
-CONDITIONS_REQUIRED = ["condition_id", "cell_line", "drug_name", "dose", "is_control", "plate", "n_cells", "qc_pass"]
+CONDITIONS_REQUIRED = ["condition_id", "cell_line", "depmap_id", "drug_name", "dose", "is_control", "plate", "n_cells", "qc_pass"]
 
 
 def _check(ok: bool, message: str) -> None:
@@ -53,6 +53,8 @@ def validate_conditions(conditions: pd.DataFrame) -> None:
     missing = set(CONDITIONS_REQUIRED) - set(conditions.columns)
     _check(not missing, f"conditions: missing columns {sorted(missing)}")
     _check(conditions["condition_id"].is_unique, "conditions: condition_id is not unique")
+    no_depmap = sorted(conditions.loc[conditions["depmap_id"].isna(), "cell_line"].unique())
+    _check(not no_depmap, f"conditions: cell line(s) without depmap_id: {no_depmap}")
     _check(conditions[CONDITIONS_REQUIRED].notna().all().all(), "conditions: nulls in required columns")
     _check((conditions["n_cells"] >= 0).all(), "conditions: negative n_cells")
     orphans = conditions[~conditions["is_control"] & conditions["control_condition_id"].isna()]
