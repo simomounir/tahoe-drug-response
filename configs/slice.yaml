@@ -3,8 +3,9 @@ status: validated_candidate
 notes: >-
   This slice is based on the live remote metadata counts gathered in Step 0. The
   selected cell lines are the highest-depth lines in the dataset. All 8 resolve to
-  a DepMap ID and span 5 tissues (see cell_line_info). CVCL_0334 is shallow on
-  plate3 and duplicates pancreas; CVCL_0131 (A-172, CNS) is the proposed swap.
+  a DepMap ID and span 6 tissues (see cell_line_info). CVCL_0371 (KATO III)
+  replaced CVCL_0334 (Hs 766T), which was shallow (median 464 cells/condition on
+  plate3) and duplicated pancreas.
 
 selected_cell_lines:
   - CVCL_0546
@@ -14,7 +15,7 @@ selected_cell_lines:
   - CVCL_0399
   - CVCL_1056
   - CVCL_0293
-  - CVCL_0334
+  - CVCL_0371
 
 # From tahoebio/Tahoe-100M metadata/cell_line_metadata.parquet
 # (Cell_ID_Cellosaur -> Cell_ID_DepMap, Organ). Cell names in comments.
@@ -26,7 +27,7 @@ cell_line_info:
   CVCL_0399: {depmap_id: ACH-000950, tissue: Bowel}     # LoVo
   CVCL_1056: {depmap_id: ACH-000555, tissue: Kidney}    # A498
   CVCL_0293: {depmap_id: ACH-000954, tissue: Uterus}    # HEC-1-A
-  CVCL_0334: {depmap_id: ACH-000178, tissue: Pancreas}  # Hs 766T
+  CVCL_0371: {depmap_id: ACH-000793, tissue: Esophagus/Stomach}  # KATO III
 
 min_cells_per_condition: 100
 min_control_cells: 500
