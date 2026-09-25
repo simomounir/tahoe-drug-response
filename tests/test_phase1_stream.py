@@ -106,7 +106,8 @@ def test_combine_partials_refuses_to_round_non_integer_counts(tmp_path):
     SHARD_A.assign(expressions=[[-2.0, 3.5, 4.0], [5.0], [1.0, 2.0], [99.0]]).to_parquet(shard_path)
     g, c = tmp_path / "g.parquet", tmp_path / "c.parquet"
     aggregate_shard(con, shard_path, LINES, PLATES, g, c)
-    with pytest.raises(duckdb.Error, match="non-integer sum_counts"):
+    # Both checks trip on this input; DuckDB's parallel evaluation decides which reports first.
+    with pytest.raises(duckdb.Error, match="non-integer (sum_counts|library_size)"):
         combine_partials(con, [g], [c], condition_lookup(METADATA), tmp_path / "pseudobulk.parquet")
 
 
