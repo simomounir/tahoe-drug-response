@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import resource
+import sys
+import time
 from pathlib import Path
 
 import duckdb
@@ -14,6 +17,13 @@ from phase1.qc import flag_conditions, render_qc_report, summarize_qc
 from phase1.stream import combine_partials, sql_str, write_logfc
 
 CONTROL_COLUMNS = ["cell_line", "plate", "condition_id", "n_cells", "library_size", "qc_pass"]
+
+
+def peak_rss_mb() -> float:
+    """Peak resident memory of this process so far, in MB (includes DuckDB, which runs in-process)."""
+    # ru_maxrss is bytes on macOS, kilobytes on Linux.
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(rss / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
 
 
 def build_outputs(
@@ -35,8 +45,19 @@ def build_outputs(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = metadata[metadata["cell_line"].isin(selected_lines)]
 
+    # Wall time and peak RSS per stage; kept out of the QC report so the report stays deterministic.
+    timings: dict[str, dict] = {}
+    stage_start = time.perf_counter()
+
+    def end_stage(name: str) -> None:
+        nonlocal stage_start
+        now = time.perf_counter()
+        timings[name] = {"seconds": round(now - stage_start, 2), "peak_rss_mb": peak_rss_mb()}
+        stage_start = now
+
     pseudobulk_path = output_dir / "pseudobulk.parquet"
     per_condition = combine_partials(con, gene_files, cell_files, condition_lookup(metadata), pseudobulk_path)
+    end_stage("pseudobulk")
 
     # n_cells = cells actually processed; n_cells_atlas = what the metadata says exists.
     conditions = build_condition_table(metadata, selected_lines, control_drugs).rename(columns={"n_cells": "n_cells_atlas"})
@@ -47,10 +68,12 @@ def build_outputs(
     conditions["qc_pass"] = flag_conditions(conditions, min_cells, min_control)
     conditions = assign_controls(conditions)
     summary = summarize_qc(conditions, per_condition, min_cells_per_condition=min_cells, min_control_cells=min_control)
+    end_stage("conditions")
 
     logfc_path = output_dir / "logfc.parquet"
     n_logfc = write_logfc(con, pseudobulk_path, conditions, logfc_path)
     summary["n_logfc_conditions"] = n_logfc
+    end_stage("logfc")
 
     validate_conditions(conditions)
     validate_pseudobulk(con, pseudobulk_path, conditions)
@@ -69,12 +92,15 @@ def build_outputs(
         summary["gene_coverage"] = _zero_count_genes(con, pseudobulk_path, genes_path)
     else:
         summary["gene_coverage"] = {"skipped": True}
+    end_stage("checks")
 
     conditions.to_parquet(output_dir / "conditions.parquet", index=False)
     conditions[conditions["is_control"]][CONTROL_COLUMNS].rename(columns={"condition_id": "control_condition_id"}).to_parquet(
         output_dir / "controls.parquet", index=False
     )
     report_path.write_text(render_qc_report(summary), encoding="utf-8")
+    end_stage("write")
+    summary["timings"] = timings
     return {"summary": summary, "conditions": conditions}
 
 

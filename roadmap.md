@@ -23,13 +23,12 @@ profiles per (cell line, drug, dose) with matched controls, and produce a QC rep
 explains what was dropped and why.
 **Spec:** [`phase1.md`](phase1.md)
 
-### Phase 2 — C++ aggregation kernel
-Replace the Python aggregation with a C++ implementation wrapped via nanobind, built into
-wheels for Linux and macOS in CI.
+### Phase 2 — Native environment and performance baseline
+Move the environment to native arm64 Python (the current `.venv` is x86_64 under Rosetta on
+an M1) and re-measure where build time goes, with the method documented.
 
-**Done when:** output matches the Python reference exactly on the fixture; a benchmark
-reports a real speedup with the measurement method documented; wheels build and install
-from CI.
+**Done when:** tests and a real `make phase1` pass on native Python with outputs identical to
+the previous build; download vs reduce vs rebuild timings are recorded with the method.
 
 ### Phase 3 — Features
 Chemistry features from SMILES (fingerprints, descriptors, scaffolds), cell-line context
@@ -62,7 +61,7 @@ reproduce the headline number from the repo in under 10 minutes.
 | Phase | Estimate |
 |---|---|
 | 1 — Ingest | 2–3 weeks |
-| 2 — C++ kernel | 1–2 weeks |
+| 2 — Native env + baseline | days |
 | 3 — Features | 2–3 weeks |
 | 4 — Evaluation and models | 3 weeks |
 | 5 — Delivery | 2 weeks |
@@ -87,7 +86,8 @@ rather than letting phase 1 expand into it.
 - [x] Phase 1 — `make phase1` builds plates 1–3 (92 drugs × 3 doses, 8 lines, 6 tissues) with
   contracts: 2,123/2,213 conditions, 24/24 DMSO controls, logFC for 2,099, 418 MB; 43 tests
   in CI. See [`phase1.md` §13](phase1.md).
-- [ ] Phase 2
+- [x] Phase 2 — native arm64 `.venv` (identical outputs, rebuild 530 s → 344 s median);
+  baseline with method in [`docs/performance_baseline.md`](docs/performance_baseline.md).
 - [ ] Phase 3
 - [ ] Phase 4
 - [ ] Phase 5

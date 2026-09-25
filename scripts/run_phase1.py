@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import resource
+import platform
 import sys
 import time
 from pathlib import Path
@@ -18,7 +18,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from phase1.build import build_outputs
+from phase1.build import build_outputs, peak_rss_mb
 from phase1.config import load_slice_config
 from phase1.stream import aggregate_shard, connect, shards_for_plates
 
@@ -29,12 +29,6 @@ RAW_DIR = ROOT / "data" / "raw"
 PLATE_MAP_PATH = CACHE_DIR / "shard_plate_map.parquet"
 DUCKDB_MEMORY_LIMIT = "2GB"
 SHARD_LOG_FIELDS = ["shard", "rows_read", "rows_kept", "bytes", "download_s", "aggregate_s", "peak_rss_mb"]
-
-
-def _peak_rss_mb() -> float:
-    # ru_maxrss is bytes on macOS, kilobytes on Linux.
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return round(rss / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
 
 
 def _connect(remote: bool = False) -> duckdb.DuckDBPyConnection:
@@ -112,7 +106,7 @@ def process_shards(shards: list[int], selected_lines: list[str], plates: list[st
                 "bytes": local.stat().st_size,
                 "download_s": round(t1 - t0, 2),
                 "aggregate_s": round(t2 - t1, 2),
-                "peak_rss_mb": _peak_rss_mb(),
+                "peak_rss_mb": peak_rss_mb(),
             }
             local.unlink()
             log.writerow(row)
@@ -177,6 +171,8 @@ def main() -> None:
     metadata = metadata[metadata["plate"].isin(plates)]
 
     con = _connect()
+    threads = con.execute("SELECT current_setting('threads')").fetchone()[0]
+    print(f"Build: Python {platform.python_version()} {platform.machine()}, DuckDB {duckdb.__version__}, {threads} threads", flush=True)
     result = build_outputs(
         con,
         gene_files,
@@ -196,6 +192,8 @@ def main() -> None:
     print(f"Status: {summary['status']}")
     for warning in summary["warnings"]:
         print(f"WARNING: {warning}")
+    for stage, t in summary["timings"].items():
+        print(f"Stage {stage}: {t['seconds']} s, peak RSS {t['peak_rss_mb']} MB")
     print(f"Contracts: passed. Outputs in {args.output_dir}, report at {args.report}")
 
 

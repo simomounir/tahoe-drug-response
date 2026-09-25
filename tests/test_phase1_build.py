@@ -134,3 +134,13 @@ def test_output_size_over_limit_fails(tmp_path):
 
 def test_slice_config_declares_max_output_mb():
     assert "max_output_mb" in load_slice_config(SLICE_CONFIG)
+
+
+def test_build_reports_stage_timings_outside_the_qc_report(tmp_path):
+    result, _ = _run(tmp_path, _metadata())
+    timings = result["summary"]["timings"]
+    assert list(timings) == ["pseudobulk", "conditions", "logfc", "checks", "write"]
+    for stage in timings.values():
+        assert stage["seconds"] >= 0
+        assert stage["peak_rss_mb"] > 0
+    assert "seconds" not in (tmp_path / "qc.md").read_text()

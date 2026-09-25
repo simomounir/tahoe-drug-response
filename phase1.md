@@ -20,7 +20,6 @@ and regenerated with one command.
 
 Explicitly **out of scope** for this phase:
 
-- The C++ aggregation kernel (phase 2 — phase 1 ships the Python reference implementation)
 - DepMap or chemistry features (phase 3)
 - Any model, baseline or evaluation split (phase 4)
 - Any cloud resource, orchestration tool or deployed service (phase 5)
@@ -345,16 +344,6 @@ Code: `src/phase1/stream.py` (shard reduce, per-plate combine, logFC in DuckDB),
 
 ### Next
 
-Phase 2: the C++ aggregation kernel, which must reproduce `tests/fixtures/expected_*.parquet`
-exactly and is benchmarked against the throughput above.
-
----
-
-## Appendix — what phase 2 will need from this
-
-The C++ aggregation kernel replaces §7.3 and must reproduce the Python reference
-implementation **exactly**. To make that testable, phase 1 must leave behind:
-
-- The Python reference implementation, kept in the repo and not deleted
-- The committed fixture, with expected outputs stored alongside it
-- The per-shard timing log, to serve as the baseline for the speed comparison
+Phase 2: native arm64 environment and performance baseline (see `roadmap.md`). The committed
+fixture and its stored expected outputs remain the exact regression reference for any change
+to the aggregation.
