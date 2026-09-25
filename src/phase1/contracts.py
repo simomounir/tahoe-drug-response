@@ -15,20 +15,16 @@ class ContractError(Exception):
 
 PSEUDOBULK_SCHEMA = {
     "condition_id": "VARCHAR",
-    "gene": "BIGINT",
-    "sum_counts": "DOUBLE",
-    "n_cells": "BIGINT",
-    "library_size": "DOUBLE",
-    "cpm": "DOUBLE",
-    "log1p_cpm": "DOUBLE",
+    "gene": "INTEGER",
+    "sum_counts": "INTEGER",
+    "n_cells": "INTEGER",
+    "library_size": "BIGINT",
 }
 LOGFC_SCHEMA = {
     "condition_id": "VARCHAR",
     "control_condition_id": "VARCHAR",
-    "gene": "BIGINT",
-    "cpm": "DOUBLE",
-    "cpm_control": "DOUBLE",
-    "logfc": "DOUBLE",
+    "gene": "INTEGER",
+    "logfc": "FLOAT",
 }
 CONDITIONS_REQUIRED = ["condition_id", "cell_line", "depmap_id", "drug_name", "dose", "is_control", "plate", "n_cells", "qc_pass"]
 
@@ -81,3 +77,9 @@ def validate_logfc(con: duckdb.DuckDBPyConnection, path: Path, expected_conditio
     check_parquet_schema(con, path, LOGFC_SCHEMA)
     n = _scalar(con, f"SELECT COUNT(DISTINCT condition_id) FROM read_parquet({sql_str(path)})")
     _check(n == expected_conditions, f"{path.name}: {n} conditions, expected {expected_conditions}")
+
+
+def validate_output_size(size_mb: float, max_output_mb: float | None) -> None:
+    """max_output_mb = None only reports; otherwise pseudobulk + logfc must fit within it."""
+    if max_output_mb is not None:
+        _check(size_mb <= max_output_mb, f"outputs: pseudobulk + logfc = {size_mb:.6g} MB exceeds max_output_mb = {max_output_mb}")

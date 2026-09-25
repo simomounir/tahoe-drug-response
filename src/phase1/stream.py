@@ -7,6 +7,8 @@ import pandas as pd
 
 from phase1.pseudobulk import SPECIAL_TOKENS
 
+PARQUET_OPTIONS = "COMPRESSION zstd, COMPRESSION_LEVEL 9"
+
 
 def sql_str(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
@@ -100,12 +102,18 @@ def combine_partials(
         FROM sums s JOIN cells c USING (condition_id)
         """
     )
+    # Math stays DOUBLE; cast at write time and fail rather than silently round a non-integer count.
     con.execute(
         f"""
         COPY (
-            SELECT *, sum_counts / library_size * 1e6 AS cpm, ln(1 + sum_counts / library_size * 1e6) AS log1p_cpm
+            SELECT condition_id, gene::INTEGER AS gene,
+                   CASE WHEN sum_counts = round(sum_counts) THEN sum_counts::INTEGER
+                        ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts,
+                   n_cells::INTEGER AS n_cells,
+                   CASE WHEN library_size = round(library_size) THEN library_size::BIGINT
+                        ELSE error('pseudobulk: non-integer library_size for ' || condition_id) END AS library_size
             FROM pb ORDER BY condition_id, gene
-        ) TO {sql_str(out_path)} (FORMAT parquet, COMPRESSION zstd)
+        ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
         """
     )
     per_condition = con.execute(
@@ -119,6 +127,7 @@ def combine_partials(
 def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, conditions: pd.DataFrame, out_path: Path) -> int:
     """logfc = ln(1 + cpm) - ln(1 + cpm_control), per gene, against the same line's DMSO on the same plate.
 
+    cpm = sum_counts / library_size * 1e6, computed here in DOUBLE; only logfc is stored (as FLOAT).
     Only QC-passing treated conditions with a QC-passing control; genes seen in either profile.
     Returns the number of treated conditions written.
     """
@@ -129,7 +138,8 @@ def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, condition
     con.execute(
         f"""
         COPY (
-            WITH pb AS (SELECT condition_id, gene, cpm FROM read_parquet({sql_str(pseudobulk_path)})),
+            WITH pb AS (SELECT condition_id, gene, sum_counts::DOUBLE / library_size::DOUBLE * 1e6 AS cpm
+                        FROM read_parquet({sql_str(pseudobulk_path)})),
             t AS (SELECT p.condition_id, p.control_condition_id, pb.gene, pb.cpm
                   FROM pairs p JOIN pb USING (condition_id)),
             c AS (SELECT p.condition_id, p.control_condition_id, pb.gene, pb.cpm
@@ -137,12 +147,10 @@ def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, condition
             SELECT COALESCE(t.condition_id, c.condition_id) AS condition_id,
                    COALESCE(t.control_condition_id, c.control_condition_id) AS control_condition_id,
                    COALESCE(t.gene, c.gene) AS gene,
-                   COALESCE(t.cpm, 0)::DOUBLE AS cpm,
-                   COALESCE(c.cpm, 0)::DOUBLE AS cpm_control,
-                   ln(1 + COALESCE(t.cpm, 0)) - ln(1 + COALESCE(c.cpm, 0)) AS logfc
+                   (ln(1 + COALESCE(t.cpm, 0)) - ln(1 + COALESCE(c.cpm, 0)))::FLOAT AS logfc
             FROM t FULL OUTER JOIN c ON t.condition_id = c.condition_id AND t.gene = c.gene
             ORDER BY condition_id, gene
-        ) TO {sql_str(out_path)} (FORMAT parquet, COMPRESSION zstd)
+        ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
         """
     )
     con.unregister("pairs")

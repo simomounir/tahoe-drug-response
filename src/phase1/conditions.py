@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import pandas as pd
 
@@ -52,16 +51,6 @@ def assign_controls(conditions: pd.DataFrame) -> pd.DataFrame:
     out = conditions.copy()
     out["control_condition_id"] = [mapping.get(key) for key in zip(out["cell_line"], out["plate"])]
     return out
-
-
-def load_fixture_metadata(path: str | Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    # ensure the required columns exist
-    required = {"cell_line", "drug", "drugname_drugconc", "plate", "sample", "n_cells"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing fixture columns: {sorted(missing)}")
-    return df
 
 
 JOIN_COLUMNS = ["sample", "plate", "cell_line"]

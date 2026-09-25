@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -56,7 +57,8 @@ def test_streamed_pseudobulk_matches_in_memory_pseudobulk(tmp_path):
     cells = cells[cells["cell_line"].isin(LINES) & cells["plate"].isin(PLATES)]
     expected = build_pseudobulk(attach_condition_ids(cells, METADATA))
 
-    cols = ["condition_id", "gene", "sum_counts", "n_cells", "library_size", "cpm", "log1p_cpm"]
+    cols = ["condition_id", "gene", "sum_counts", "n_cells", "library_size"]
+    assert list(streamed.columns) == cols
     pd.testing.assert_frame_equal(
         streamed[cols].reset_index(drop=True), expected[cols].reset_index(drop=True), check_dtype=False
     )
@@ -64,6 +66,16 @@ def test_streamed_pseudobulk_matches_in_memory_pseudobulk(tmp_path):
     assert per_condition["n_cells"].sum() == 5
     assert 1 not in set(streamed["gene"])
     assert (streamed["sum_counts"] > 0).all()
+
+
+def test_combine_partials_refuses_to_round_non_integer_counts(tmp_path):
+    con = connect(temp_dir=tmp_path)
+    shard_path = tmp_path / "a.parquet"
+    SHARD_A.assign(expressions=[[-2.0, 3.5, 4.0], [5.0], [1.0, 2.0], [99.0]]).to_parquet(shard_path)
+    g, c = tmp_path / "g.parquet", tmp_path / "c.parquet"
+    aggregate_shard(con, shard_path, LINES, PLATES, g, c)
+    with pytest.raises(duckdb.Error, match="non-integer sum_counts"):
+        combine_partials(con, [g], [c], condition_lookup(METADATA), tmp_path / "pseudobulk.parquet")
 
 
 def test_aggregate_shard_reports_kept_cells(tmp_path):

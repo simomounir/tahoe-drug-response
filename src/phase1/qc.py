@@ -110,6 +110,9 @@ def render_qc_report(summary: dict) -> str:
     lines += [f"- WARNING: {w}" for w in summary.get("warnings", [])]
     if "n_logfc_conditions" in summary:
         lines.append(f"Treated conditions with logFC vs plate-matched DMSO: {summary['n_logfc_conditions']}")
+    if "output_size_mb" in summary:
+        limit = summary.get("max_output_mb")
+        lines.append(f"Output size: {summary['output_size_mb']} MB" + (f" (limit {limit} MB)" if limit is not None else ""))
     gene_coverage = summary.get("gene_coverage")
     if gene_coverage is not None:
         if gene_coverage.get("skipped"):

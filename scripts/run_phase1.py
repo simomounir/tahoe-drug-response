@@ -19,7 +19,6 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from phase1.build import build_outputs
-from phase1.conditions import load_fixture_metadata
 from phase1.config import load_slice_config
 from phase1.stream import aggregate_shard, connect, shards_for_plates
 
@@ -43,31 +42,37 @@ def _connect(remote: bool = False) -> duckdb.DuckDBPyConnection:
     return connect(DUCKDB_MEMORY_LIMIT, CACHE_DIR / "duckdb_tmp", remote=remote)
 
 
-def load_metadata_source(path_like: str | Path, selected_lines: list[str]) -> pd.DataFrame:
+def load_metadata_source(path_like: str | Path, selected_lines: list[str], pass_filter: str = "full") -> pd.DataFrame:
     """Return one row per (cell_line, plate, sample, drug, drugname_drugconc) with n_cells.
 
     Aggregation happens inside DuckDB; the per-cell table (~100M rows) never reaches pandas.
+    Per-cell Parquet with a `pass_filter` column counts only cells with that value.
     """
     spec = str(path_like)
     if not (spec.startswith("http") or Path(spec).suffix.lower() in {".parquet", ".pq"}):
-        df = load_fixture_metadata(spec)
+        df = pd.read_csv(spec)
         return df[df["cell_line"].isin(selected_lines)].copy()
 
-    key = hashlib.sha1((spec + "|" + ",".join(sorted(selected_lines))).encode()).hexdigest()[:12]
+    key_payload = spec + "|" + ",".join(sorted(selected_lines)) + f"|pass_filter={pass_filter}"
+    key = hashlib.sha1(key_payload.encode()).hexdigest()[:12]
     cache_path = CACHE_DIR / f"metadata_by_sample_{key}.parquet"
     if cache_path.exists():
         return pd.read_parquet(cache_path)
 
+    con = _connect(remote=spec.startswith("http"))
+    columns = [d[0] for d in con.execute("SELECT * FROM read_parquet(?) LIMIT 0", [spec]).description]
+    # Expression shards hold only pass_filter == 'full' cells, so the atlas count must match.
+    pass_filter_clause = "AND pass_filter = ?" if "pass_filter" in columns else ""
     placeholders = ", ".join(["?"] * len(selected_lines))
     query = f"""
         SELECT cell_line, plate, sample, drug, drugname_drugconc, COUNT(*) AS n_cells
         FROM read_parquet(?)
-        WHERE cell_line IN ({placeholders})
+        WHERE cell_line IN ({placeholders}) {pass_filter_clause}
         GROUP BY ALL
         ORDER BY cell_line, plate, sample
     """
-    con = _connect(remote=True)
-    df = con.execute(query, [spec, *selected_lines]).fetchdf()
+    params = [spec, *selected_lines] + ([pass_filter] if pass_filter_clause else [])
+    df = con.execute(query, params).fetchdf()
     con.close()
     df.to_parquet(cache_path, index=False)
     return df

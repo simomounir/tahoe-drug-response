@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 # Tahoe prepends token 1 (value -2) to every cell's gene list; it is a marker, not a gene.
 SPECIAL_TOKENS = (1,)
 
 
+def cpm(sum_counts, library_size):
+    """Counts per million; derived on demand, not stored in pseudobulk."""
+    return sum_counts / library_size * 1_000_000.0
+
+
 def build_pseudobulk(df: pd.DataFrame) -> pd.DataFrame:
-    """Sum sparse (genes, expressions) rows per condition and compute CPM / log1p CPM.
+    """Sum sparse (genes, expressions) rows per condition; adds n_cells and library_size.
 
     Rows may be single cells or pre-aggregated groups; n_cells is summed per condition.
     """
@@ -30,6 +34,4 @@ def build_pseudobulk(df: pd.DataFrame) -> pd.DataFrame:
     grouped["n_cells"] = grouped["condition_id"].map(n_cells).astype("int64")
 
     grouped["library_size"] = grouped.groupby("condition_id")["sum_counts"].transform("sum")
-    grouped["cpm"] = grouped["sum_counts"] / grouped["library_size"] * 1_000_000.0
-    grouped["log1p_cpm"] = np.log1p(grouped["cpm"])
     return grouped.sort_values(["condition_id", "gene"]).reset_index(drop=True)

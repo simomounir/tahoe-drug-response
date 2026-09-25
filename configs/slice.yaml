@@ -40,5 +40,8 @@ control_drugs:
 plates:
   - plate3
 
+# null = report only; a number = fail the build if pseudobulk + logfc exceed it (MB = 1e6 bytes).
+max_output_mb: null
+
 # These thresholds match the draft Phase 1 QC contract; the final slice should be
 # rechecked against plate-matched controls and DepMap coverage before publication.

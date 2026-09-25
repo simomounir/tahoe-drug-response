@@ -6,7 +6,7 @@ import duckdb
 import pandas as pd
 
 from phase1.conditions import assign_controls, build_condition_table, condition_lookup
-from phase1.contracts import validate_conditions, validate_logfc, validate_pseudobulk
+from phase1.contracts import validate_conditions, validate_logfc, validate_output_size, validate_pseudobulk
 from phase1.genes import validate_gene_coverage
 from phase1.parse import CONTROL_DRUGS
 from phase1.pseudobulk import SPECIAL_TOKENS
@@ -55,6 +55,12 @@ def build_outputs(
     validate_conditions(conditions)
     validate_pseudobulk(con, pseudobulk_path, conditions)
     validate_logfc(con, logfc_path, n_logfc)
+
+    max_output_mb = config.get("max_output_mb")
+    output_mb = (pseudobulk_path.stat().st_size + logfc_path.stat().st_size) / 1e6
+    summary["output_size_mb"] = round(output_mb, 2)
+    summary["max_output_mb"] = max_output_mb
+    validate_output_size(output_mb, max_output_mb)
 
     if genes_path is None:
         genes_path = output_dir / "genes.parquet"

@@ -105,3 +105,32 @@ def test_slice_config_has_depmap_id_and_tissue_for_every_selected_line():
     for line in config["selected_cell_lines"]:
         assert info[line]["depmap_id"].startswith("ACH-"), line
         assert info[line]["tissue"], line
+
+
+def _output_mb(out: Path) -> float:
+    return round(sum((out / f).stat().st_size for f in ("pseudobulk.parquet", "logfc.parquet")) / 1e6, 2)
+
+
+def test_output_size_is_only_reported_when_no_limit_is_set(tmp_path):
+    result, out = _run(tmp_path, _metadata(), {**CONFIG, "max_output_mb": None})
+    summary = result["summary"]
+    assert summary["max_output_mb"] is None
+    assert summary["output_size_mb"] == _output_mb(out)
+    report = (tmp_path / "qc.md").read_text()
+    assert f"Output size: {summary['output_size_mb']} MB\n" in report
+    assert "limit" not in report
+
+
+def test_output_size_within_limit_passes(tmp_path):
+    result, _ = _run(tmp_path, _metadata(), {**CONFIG, "max_output_mb": 100})
+    assert result["summary"]["max_output_mb"] == 100
+    assert f"Output size: {result['summary']['output_size_mb']} MB (limit 100 MB)" in (tmp_path / "qc.md").read_text()
+
+
+def test_output_size_over_limit_fails(tmp_path):
+    with pytest.raises(ContractError, match="exceeds max_output_mb = 1e-06"):
+        _run(tmp_path, _metadata(), {**CONFIG, "max_output_mb": 1e-6})
+
+
+def test_slice_config_declares_max_output_mb():
+    assert "max_output_mb" in load_slice_config(SLICE_CONFIG)
