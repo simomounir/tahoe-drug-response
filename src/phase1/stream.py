@@ -129,15 +129,21 @@ def _combine_plate(
     out_path: Path,
 ) -> pd.DataFrame:
     con.register("lookup", lookup)
-    # Math stays DOUBLE; cast at write time and fail rather than silently round a non-integer count.
+    # Sums are exact in DOUBLE; each is checked once, then library_size is integer addition of checked counts.
     con.execute(
         f"""
         COPY (
-            WITH sums AS (
-                SELECT l.condition_id, g.gene, SUM(g.value) AS sum_counts
+            WITH raw AS (
+                SELECT l.condition_id, g.gene, SUM(g.value) AS total
                 FROM read_parquet({sql_list(gene_files)}) g JOIN lookup l USING (sample, plate, cell_line)
                 WHERE g.plate = {sql_str(plate)} AND g.gene NOT IN ({", ".join(str(t) for t in SPECIAL_TOKENS)})
                 GROUP BY ALL
+            ),
+            sums AS (
+                SELECT condition_id, gene,
+                       CASE WHEN total = round(total) THEN total::INTEGER
+                            ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts
+                FROM raw
             ),
             cells AS (
                 SELECT l.condition_id, SUM(c.n_cells)::BIGINT AS n_cells
@@ -145,16 +151,9 @@ def _combine_plate(
                 WHERE c.plate = {sql_str(plate)}
                 GROUP BY ALL
             ),
-            libs AS (SELECT condition_id, SUM(sum_counts) AS library_size FROM sums GROUP BY ALL),
-            pb AS (SELECT s.condition_id, s.gene, s.sum_counts, c.n_cells, b.library_size
-                   FROM sums s JOIN cells c USING (condition_id) JOIN libs b USING (condition_id))
-            SELECT condition_id, gene::INTEGER AS gene,
-                   CASE WHEN sum_counts = round(sum_counts) THEN sum_counts::INTEGER
-                        ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts,
-                   n_cells::INTEGER AS n_cells,
-                   CASE WHEN library_size = round(library_size) THEN library_size::BIGINT
-                        ELSE error('pseudobulk: non-integer library_size for ' || condition_id) END AS library_size
-            FROM pb
+            libs AS (SELECT condition_id, SUM(sum_counts)::BIGINT AS library_size FROM sums GROUP BY ALL)
+            SELECT s.condition_id, s.gene::INTEGER AS gene, s.sum_counts, c.n_cells::INTEGER AS n_cells, b.library_size
+            FROM sums s JOIN cells c USING (condition_id) JOIN libs b USING (condition_id)
         ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
         """
     )
