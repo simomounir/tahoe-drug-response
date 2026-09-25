@@ -58,5 +58,13 @@ def test_render_qc_report_includes_key_summary_lines():
     assert "# Phase 1 QC report" in report
     assert "Conditions retained: 2 / 4" in report
     assert "Dropped conditions: c3" in report
+    assert "Mean library size: 1,850" in report
     assert "Controls retained: 1 / 2" in report
     assert "Status: pass" in report
+
+
+def test_render_qc_report_counts_dropped_when_table_lists_them():
+    table = pd.DataFrame({"cell_line": ["L1", "L2"], "reason": ["n_cells 3 < 100", "n_cells 7 < 100"]})
+    report = render_qc_report({"dropped_conditions": ["c3", "c4"], "tables": {"Dropped conditions": table}})
+    assert "Dropped conditions: 2 (see table below)" in report
+    assert "c3" not in report

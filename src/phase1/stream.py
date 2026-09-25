@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import duckdb
@@ -102,62 +103,95 @@ def combine_partials(
 ) -> pd.DataFrame:
     """Sum shard partials into condition-level pseudobulk (written to out_path); return per-condition totals.
 
-    Conditions never span plates, so each plate is reduced on its own to bound memory.
+    Conditions never span plates or cell lines, so each (plate, cell line) is reduced on its own
+    to bound memory; a plate-wide aggregation sits right at the 2 GB DuckDB cap.
     """
     keys = ["sample", "plate", "cell_line"]
     lookup = lookup[keys + ["condition_id"]].drop_duplicates(keys)
     parts, per_condition = [], []
     try:
-        for plate in sorted(lookup["plate"].unique()):
-            parts.append(_part_path(out_path, plate))
-            per_condition.append(_combine_plate(con, gene_files, cell_files, lookup[lookup["plate"] == plate], plate, parts[-1]))
+        for plate, plate_lookup in lookup.groupby("plate", sort=True):
+            stage = out_path.with_name(f".{out_path.stem}.{plate}.stage")
+            try:
+                _stage_plate(con, gene_files, plate, stage)
+                for line, group in plate_lookup.groupby("cell_line", sort=True):
+                    line_dir = stage / f"cell_line={line}"
+                    if not line_dir.exists():
+                        continue
+                    parts.append(_part_path(out_path, plate, line))
+                    per_condition.append(_combine_group(con, line_dir, cell_files, group, plate, line, parts[-1]))
+            finally:
+                shutil.rmtree(stage, ignore_errors=True)
     except BaseException:
         _remove(parts)
         raise
     if not parts:
-        raise ValueError("combine_partials: lookup has no plates")
+        raise ValueError("combine_partials: no gene rows for any plate in the lookup")
     _merge_parts(con, parts, out_path)
     return pd.concat(per_condition, ignore_index=True)
 
 
-def _combine_plate(
-    con: duckdb.DuckDBPyConnection,
-    gene_files: list[Path],
-    cell_files: list[Path],
-    lookup: pd.DataFrame,
-    plate: str,
-    out_path: Path,
-) -> pd.DataFrame:
-    con.register("lookup", lookup)
-    # Sums are exact in DOUBLE; each is checked once, then library_size is integer addition of checked counts.
+def _stage_plate(con: duckdb.DuckDBPyConnection, gene_files: list[Path], plate: str, stage: Path) -> None:
+    """One streaming pass: this plate's gene rows, split on disk by cell line (no aggregation)."""
+    shutil.rmtree(stage, ignore_errors=True)
     con.execute(
         f"""
         COPY (
-            WITH raw AS (
-                SELECT l.condition_id, g.gene, SUM(g.value) AS total
-                FROM read_parquet({sql_list(gene_files)}) g JOIN lookup l USING (sample, plate, cell_line)
-                WHERE g.plate = {sql_str(plate)} AND g.gene NOT IN ({", ".join(str(t) for t in SPECIAL_TOKENS)})
-                GROUP BY ALL
-            ),
-            sums AS (
-                SELECT condition_id, gene,
-                       CASE WHEN total = round(total) THEN total::INTEGER
-                            ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts
-                FROM raw
-            ),
-            cells AS (
-                SELECT l.condition_id, SUM(c.n_cells)::BIGINT AS n_cells
-                FROM read_parquet({sql_list(cell_files)}) c JOIN lookup l USING (sample, plate, cell_line)
-                WHERE c.plate = {sql_str(plate)}
-                GROUP BY ALL
-            ),
-            libs AS (SELECT condition_id, SUM(sum_counts)::BIGINT AS library_size FROM sums GROUP BY ALL)
-            SELECT s.condition_id, s.gene::INTEGER AS gene, s.sum_counts, c.n_cells::INTEGER AS n_cells, b.library_size
-            FROM sums s JOIN cells c USING (condition_id) JOIN libs b USING (condition_id)
-        ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
+            SELECT cell_line, sample, gene, value
+            FROM read_parquet({sql_list(gene_files)})
+            WHERE plate = {sql_str(plate)} AND gene NOT IN ({", ".join(str(t) for t in SPECIAL_TOKENS)})
+        ) TO {sql_str(stage)} (FORMAT parquet, PARTITION_BY (cell_line))
         """
     )
-    con.unregister("lookup")
+
+
+def _combine_group(
+    con: duckdb.DuckDBPyConnection,
+    line_dir: Path,
+    cell_files: list[Path],
+    lookup: pd.DataFrame,
+    plate: str,
+    line: str,
+    out_path: Path,
+) -> pd.DataFrame:
+    con.register("lookup", lookup[["sample", "condition_id"]])
+    # Two statements so only one aggregation holds memory at a time; the checked sums wait on disk.
+    sums_path = out_path.with_name(out_path.name + ".sums")
+    try:
+        con.execute(
+            f"""
+            COPY (
+                SELECT condition_id, gene::INTEGER AS gene,
+                       CASE WHEN total = round(total) THEN total::INTEGER
+                            ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts
+                FROM (
+                    SELECT l.condition_id, g.gene, SUM(g.value) AS total
+                    FROM read_parquet({sql_str(line_dir / '*.parquet')}) g JOIN lookup l USING (sample)
+                    GROUP BY ALL
+                )
+            ) TO {sql_str(sums_path)} (FORMAT parquet)
+            """
+        )
+        # library_size adds already-checked integers, so it is whole by construction.
+        con.execute(
+            f"""
+            COPY (
+                WITH cells AS (
+                    SELECT l.condition_id, SUM(c.n_cells)::BIGINT AS n_cells
+                    FROM read_parquet({sql_list(cell_files)}) c JOIN lookup l USING (sample)
+                    WHERE c.plate = {sql_str(plate)} AND c.cell_line = {sql_str(line)}
+                    GROUP BY ALL
+                ),
+                libs AS (SELECT condition_id, SUM(sum_counts)::BIGINT AS library_size
+                         FROM read_parquet({sql_str(sums_path)}) GROUP BY ALL)
+                SELECT s.condition_id, s.gene, s.sum_counts, c.n_cells::INTEGER AS n_cells, b.library_size
+                FROM read_parquet({sql_str(sums_path)}) s JOIN cells c USING (condition_id) JOIN libs b USING (condition_id)
+            ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
+            """
+        )
+    finally:
+        sums_path.unlink(missing_ok=True)
+        con.unregister("lookup")
     return con.execute(
         f"""SELECT condition_id, ANY_VALUE(n_cells) AS n_cells, ANY_VALUE(library_size) AS library_size
             FROM read_parquet({sql_str(out_path)}) GROUP BY condition_id"""

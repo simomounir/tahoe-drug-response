@@ -97,14 +97,20 @@ def summarize_qc(
 
 def render_qc_report(summary: dict) -> str:
     """Render a compact markdown QC summary for Phase 1."""
-    dropped = ", ".join(summary.get("dropped_conditions", [])) if summary.get("dropped_conditions") else "none"
+    dropped_ids = summary.get("dropped_conditions", [])
+    if not dropped_ids:
+        dropped = "none"
+    elif "Dropped conditions" in summary.get("tables", {}):
+        dropped = f"{len(dropped_ids)} (see table below)"
+    else:
+        dropped = ", ".join(dropped_ids)
     lines = [
         "# Phase 1 QC report",
         "",
         f"Conditions retained: {summary.get('n_conditions_kept', 0)} / {summary.get('n_conditions_total', 0)}",
         f"Dropped conditions: {dropped}",
         f"Controls retained: {summary.get('n_control_conditions_kept', 0)} / {summary.get('n_control_conditions_total', 0)}",
-        f"Mean library size: {summary.get('mean_library_size', 0.0)}",
+        f"Mean library size: {summary.get('mean_library_size', 0.0):,.0f}",
         f"Status: {summary.get('status', 'warn')}",
     ]
     lines += [f"- WARNING: {w}" for w in summary.get("warnings", [])]

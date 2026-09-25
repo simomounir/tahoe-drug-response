@@ -1,6 +1,6 @@
 # Phase 1 — Ingest and Pseudobulk
 
-**Status:** in progress — pipeline runs end to end on real data for plate3 (see §13)
+**Status:** complete — all §11 criteria met on plates 1–3 (see §13)
 **Scope owner:** _you_
 **Target:** a reproducible local dataset of pseudobulk drug-response profiles, built from Tahoe-100M, with a QC report.
 
@@ -225,101 +225,128 @@ Answered during step 0 (details in `docs/step0_findings.md`):
 - **Sparse or dense?** Sparse: per-cell `genes` / `expressions` arrays. Aggregation
   unnests them; a leading marker token (`1`, value `-2`) must be dropped.
 - **Plate-matched controls?** Yes: 2–3 `DMSO_TF` wells per plate, every cell line on every
-  plate. Each plate is one dose.
-- **DepMap mapping?** Still open.
+  plate. Each plate is one dose, and plates come in triplets sharing one drug set
+  (plates 1/2/3 = the same 92 drugs at 0.05 / 0.5 / 5 µM).
+- **DepMap mapping?** All 8 slice lines resolve, via `metadata/cell_line_metadata.parquet`.
 - **Usable partitioning?** Yes, by plate: shards are sorted by plate, so whole files can be
   skipped. Not by cell line: every shard holds all lines.
-- **Throughput?** ~15 s per ~80 MB shard (network-bound, ~5–7 MB/s). One plate is
-  149–365 shards, i.e. roughly 40–90 minutes.
+- **Throughput?** ~6.7 s per ~100 MB shard (5.0 s download at ~20 MB/s + 1.7 s reduce).
+  One plate is 149–365 shards, i.e. roughly 17–41 minutes.
 
-## 13. Current state (2026-09-24)
+## 13. Current state (2026-09-25)
 
-**Where we are:** the pipeline runs end to end on real data for **plate3 (5 µM)** and
-the 8 configured cell lines. It produces pseudobulk profiles, plate-matched DMSO controls
-and logFC, and output checks run on every build. Not done yet: DepMap IDs, CI, gene
-symbols, zero-count gene list in the QC report.
+**Where we are:** Phase 1 is complete. The pipeline builds pseudobulk profiles, plate-matched
+DMSO controls and logFC for **plates 1, 2 and 3** (the same 92 drugs at 0.05, 0.5 and
+5 µM) and the 8 configured cell lines. Output checks run on every build, 43 offline tests
+run in CI on Ubuntu and macOS, and an example QC report is committed at
+`reports/example_qc_phase1.md`.
 
 ### How to run
 
 ```bash
 make phase1          # plates, cell lines, thresholds all from configs/slice.yaml
-make phase1-dry-run  # how many shards / GB, no download
-make test            # 20 offline tests
+make phase1-dry-run  # shards per plate and how many still need downloading
+make test            # 43 offline tests (also run by CI on every push)
 ```
 
-Outputs: `data/pseudobulk/{pseudobulk,logfc,conditions,controls}.parquet`,
-`reports/qc_phase1.md`, per-shard log at `data/cache/partials/<key>/shard_log.csv`.
-Shards already reduced are skipped, so `make phase1` resumes after a crash, and a
-rebuild from cached partials takes ~3 minutes.
+Outputs: `data/pseudobulk/{pseudobulk,logfc,conditions,controls,genes}.parquet`,
+`reports/qc_phase1.md`, per-shard log at `data/cache/partials/<plate key>/shard_log.csv`.
+Shard partials are cached per plate, so adding a plate never re-downloads the others and
+`make phase1` resumes after a crash. A rebuild from cached partials takes ~9 minutes.
+
+### Slice
+
+| Cell line | Name | DepMap ID | Tissue |
+|---|---|---|---|
+| CVCL_0546 | SW480 | ACH-000842 | Bowel |
+| CVCL_0459 | NCI-H460 | ACH-000463 | Lung |
+| CVCL_0480 | PANC-1 | ACH-000164 | Pancreas |
+| CVCL_1285 | HOP62 | ACH-000861 | Lung |
+| CVCL_0399 | LoVo | ACH-000950 | Bowel |
+| CVCL_1056 | A498 | ACH-000555 | Kidney |
+| CVCL_0293 | HEC-1-A | ACH-000954 | Uterus |
+| CVCL_0371 | KATO III | ACH-000793 | Esophagus/Stomach |
+
+6 tissues. KATO III replaced Hs 766T (CVCL_0334), which was shallow (median 328 processed
+cells per condition on plate3) and duplicated pancreas.
 
 ### Where the implementation differs from §7
 
 | Spec | Implemented | Why |
 |---|---|---|
 | Shard manifest with status | `data/cache/shard_plate_map.parquet` (plate min/max per row group); a shard's partial file is its "done" marker | The map also picks which shards to download |
-| `data/raw_subset/` partitioned by cell_line/dose | No raw copy kept. Each shard is reduced to per-(well, cell line) gene sums in `data/cache/partials/`, then deleted | The raw plate3 slice would be ~10 GB; the partials are 1.7 GB |
-| In-memory accumulators | DuckDB with a 2 GB memory cap, spilling to disk | Stays far below the 8 GB ceiling |
+| `data/raw_subset/` partitioned by cell_line/dose | No raw copy kept. Each shard is reduced to per-(well, cell line) gene sums in `data/cache/partials/<plate key>/`, then deleted | Raw plates 1–3 would be ~61 GB; the partials are 6.8 GB |
+| In-memory accumulators | DuckDB, 2 GB memory cap, spilling to disk. Each plate's gene rows are split on disk by cell line, then pseudobulk and logFC are reduced per (plate, cell line) and merged with one sort | A plate-wide aggregation sat right at the 2 GB cap (plate2: ~23M condition × gene sums); per line is ~1/8 of that. Peak RSS 2.5 GB vs the 8 GB ceiling |
+| `float64` sums | Summed in DOUBLE, then each gene count is checked to be whole and stored as INTEGER; `library_size` is integer addition of those | UMI counts are integers; a fractional count stops the build instead of being rounded |
+| `sums` / `normalized` tables | `pseudobulk.parquet` holds `sum_counts`, `n_cells`, `library_size`; CPM and log1p-CPM are not stored (`phase1.pseudobulk.cpm()` recomputes them) | Derivable columns more than doubled the size (283 → 126 MB per plate, study in `tasks.md` T4) |
+| logFC | `logfc = ln(1 + cpm) − ln(1 + cpm_control)` per gene, FLOAT, for QC-passing treated conditions vs the QC-passing DMSO of the same line and plate; genes seen in either profile | FLOAT changes values by ≤ 2.4e-7 |
 | `condition_id` from (cell_line, drug, dose) | adds `plate` | Controls are per plate |
-| `reports/qc_phase1.md` | as specified | — |
-| logFC | `logfc = ln(1 + cpm) − ln(1 + cpm_control)` per gene, for QC-passing treated conditions vs the QC-passing DMSO of the same line and plate; genes seen in either profile | Natural log, pseudocount 1 on CPM |
+| Cell counts from metadata | Only `pass_filter == 'full'` cells | The shards hold only those cells; with the filter, processed = atlas exactly |
+| Gene index | `genes.parquet`: `gene` (INTEGER, = Tahoe `token_id`), `gene_symbol`, `ensembl_id`; every observed gene must have a symbol | Readable, joinable outputs |
+| Output budget | `max_output_mb` in the config: null = report only, a number = fail above it | §11.2 limit available as a hard check when wanted |
 
-Code: `src/phase1/stream.py` (shard reduce, combine, logFC in DuckDB),
+Code: `src/phase1/stream.py` (shard reduce, per-plate combine, logFC in DuckDB),
 `src/phase1/build.py` (everything after the shard loop),
 `src/phase1/contracts.py` (schemas and invariants; a violation raises `ContractError`),
-`src/phase1/pseudobulk.py` (pandas reference, same maths),
-`src/phase1/conditions.py`, `src/phase1/qc.py`, `scripts/run_phase1.py`.
-A test checks that the DuckDB path matches the pandas reference exactly; another checks
-logFC against hand-computed values.
+`src/phase1/genes.py`, `src/phase1/pseudobulk.py` (pandas reference, same maths),
+`src/phase1/conditions.py`, `src/phase1/qc.py`, `scripts/run_phase1.py`,
+`scripts/fetch_gene_metadata.py`, `scripts/make_fixture.py`.
 
-### plate3 result
+### Result (plates 1–3)
 
 | Measure | Value |
 |---|---|
-| Shards streamed | 149 (~10 GB), one at a time |
-| Cells processed | 1,172,428 (metadata lists 1,326,434) |
-| Conditions | 744 (736 drug + 8 DMSO), `condition_id` unique |
-| Kept (≥100 cells) | 741 / 744 |
-| DMSO controls kept (≥500 cells) | 8 / 8, 705–3,386 cells each |
-| Treated conditions with logFC | 733 (736 treated − 3 dropped) |
-| Cells per condition | min 26, median 1,133, max 7,701 |
-| Output | `pseudobulk.parquet` 100 MB, `logfc.parquet` 161 MB, conditions + controls < 50 KB |
-| Rebuild from partials | 2 min 41 s, peak RSS 2.1 GB |
+| Shards streamed | 612 (61.5 GB), one at a time, each deleted after use |
+| Cells processed | 5,313,322, equal to the metadata's `pass_filter == 'full'` count |
+| Conditions | 2,213 (plate1 726, plate2 743, plate3 744), `condition_id` unique |
+| Kept (≥100 cells) | 2,123 / 2,213 (plate1 666, plate2 715, plate3 742) |
+| DMSO controls kept (≥500 cells) | 24 / 24, 2,057–14,701 cells each |
+| Treated conditions with logFC | 2,099 |
+| Cell line × drug pairs with all 3 doses | 619 / 736 (109 with 2, 8 with 1) |
+| Cells per condition | min 1, median 1,978, max 14,701 |
+| Genes | 52,933 of 62,710 observed, all with a symbol; 9,777 zero-count |
+| Output | `pseudobulk.parquet` 144 MB, `logfc.parquet` 274 MB, total 418 MB |
+| Rebuild from partials | 9.3 min, peak RSS 2.5 GB |
+
+### Throughput (per-shard log, §7.1)
+
+| Measure | Value |
+|---|---|
+| Rows read / kept | 17,273,090 / 5,313,322 |
+| Total time | 69.2 min for 612 shards |
+| Rate | ~4,160 rows/s, ~20 MB/s download |
+| Per shard (median) | 5.0 s download + 1.7 s reduce |
+| Peak RSS while streaming | 2.2 GB |
 
 ### Findings to keep in mind
 
-- **Dropped conditions are cytotoxic drugs, not pipeline errors:** Lonafarnib (CVCL_0293,
-  CVCL_0334) and LY-2584702 (CVCL_0334) have few cells even in the metadata (51–182).
-- **Coverage gap:** the expression shards hold a median 86% (range 47–99%) of the cells
-  the metadata lists per condition. Probably a cell-level QC filter; unverified.
-- **CVCL_0334's control** has 705 cells, close to the 500 threshold. The whole line is
-  shallow: median 328 cells per condition vs 1,000–1,900 for the others. Consider
-  replacing it when the DepMap/tissue check is done.
-- **Control detection** now matches exact names from `control_drugs` in the config.
-  `Trametinib (DMSO_TF solvate)` is no longer a control; the old test encoding that was
-  wrong and has been corrected.
-- **Output size:** ~260 MB per plate, so the 1 GB budget (§11.2) fits about 3–4 plates.
-  Storing logFC as float32 or dropping genes absent from both profiles would help;
-  decide before adding plates.
+- **Plate triplets:** a drug's dose response needs its plate triplet (1/2/3, 4/5/6, …).
+  Plates 4 and 5 share only 1 drug with plate3.
+- **plate1 drops are technical, not biological:** 60 conditions fail, mostly whole wells
+  that fail on every line at the lowest dose (e.g. olaparib, median 3 cells per line). plate3's two drops
+  are Lonafarnib, which is cytotoxic at 5 µM.
+- **Source naming:** `Erdafitinib ` has a trailing space in Tahoe's metadata, identically on
+  all plates, so it doesn't split conditions. Downstream joins on drug name should strip
+  whitespace.
+- **Control detection** matches exact names from `control_drugs`; `Trametinib (DMSO_TF
+  solvate)` is a drug, not a control.
 
 ### Definition of done (§11) — current state
 
 | # | Item | State |
 |---|---|---|
 | 1 | `make phase1` rebuilds everything | Yes, from config; needs the network the first time |
-| 2 | Tables exist, pass contracts, < 1 GB | Yes: 261 MB, schemas + invariants checked on every build (DepMap invariant pending) |
-| 3 | QC report explainable | Yes: dropped conditions with reasons, per-line and control tables; zero-count genes missing |
-| 4 | Tests pass offline in CI | 20 tests pass offline; no CI yet |
-| 5 | Step 0 findings recorded | Done, except DepMap |
-| 6 | Shard throughput log | Implemented; plate3 was streamed before it existed, so its log is empty until the next fresh run |
-| 7 | Raw subset deletable and rebuildable | Yes: raw shards are deleted after use, and a rerun re-downloads |
+| 2 | Tables exist, pass contracts, < 1 GB | Yes: 418 MB for 3 plates; schemas and invariants (incl. DepMap) checked on every build |
+| 3 | QC report explainable | Yes: dropped conditions with reasons, per-line and control tables, zero-count genes; example committed |
+| 4 | Tests pass offline in CI | Yes: 43 tests, GitHub Actions on Ubuntu and macOS, no network |
+| 5 | Step 0 findings recorded | Yes, `docs/step0_findings.md` |
+| 6 | Shard throughput log | Yes, see Throughput above |
+| 7 | Raw subset deletable and rebuildable | Yes: raw shards are deleted after use; deleting `data/` and rerunning rebuilds everything |
 
-### Next steps
+### Next
 
-1. DepMap IDs + tissue for the 8 lines in `configs/slice.yaml`; add the invariant.
-2. Gene index → symbol mapping from the gene metadata table.
-3. Zero-count gene list in the QC report.
-4. Decide output size policy, then add plates (e.g. plate4 = 0.05 µM, plate5 = 0.5 µM).
-5. CI running `make test`.
+Phase 2: the C++ aggregation kernel, which must reproduce `tests/fixtures/expected_*.parquet`
+exactly and is benchmarked against the throughput above.
 
 ---
 

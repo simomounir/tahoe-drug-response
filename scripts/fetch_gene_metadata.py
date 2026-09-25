@@ -44,7 +44,7 @@ def write_genes(con, source: Path, out: Path) -> int:
     con.execute(
         f"""
         COPY (
-            SELECT token_id::BIGINT AS gene, gene_symbol, ensembl_id
+            SELECT token_id::INTEGER AS gene, gene_symbol, ensembl_id
             FROM read_parquet({sql_str(source)}) ORDER BY gene
         ) TO {sql_str(out)} (FORMAT parquet, COMPRESSION zstd)
         """

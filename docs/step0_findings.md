@@ -122,6 +122,13 @@ This means the real dose values should be extracted from the metadata field rath
 
 plate3 also has one well at 0.05 µM (8 conditions across the slice lines).
 
+**Update (2026-09-25):** plates come in **triplets that share one drug set** at the three
+doses: plates 1/2/3, 4/5/6, 7/8/9 and 10/11/12. plate13 mixes all three doses on a
+43-drug set; plate14 is 5 µM on the 4/5/6 set. Plates 1–3 share all 92 treated drugs,
+while plates 4 and 5 share only 1 drug with plate3. The stray 0.05 µM well on the 0.5 and
+5 µM plates is Adagrasib. So a dose response for a drug needs its triplet, not just any
+plate at each dose.
+
 ## 6. Shard layout
 
 **Corrected 2026-09-24** (earlier figures of 4,419 files / 33,888 shards were wrong).
@@ -189,21 +196,23 @@ Initial candidate lines from the top counts are:
 
 These are the strongest starting options for a manageable 8–10 cell-line slice. The next step is to join these to DepMap metadata and verify tissue and mutational diversity before committing the exact list.
 
+**Update (2026-09-25):** all 8 resolve to DepMap IDs (`metadata/cell_line_metadata.parquet`).
+`CVCL_0334` (Hs 766T) was replaced by `CVCL_0371` (KATO III, Esophagus/Stomach): Hs 766T
+was shallow (median 464 cells/condition on plate3) and duplicated pancreas. The slice now
+spans 6 tissues; IDs and tissues are in `configs/slice.yaml`.
+
 ## 9. Open questions / decisions
 
 Resolved:
 
 - Controls: `DMSO_TF`, 2–3 wells per plate, plate-matched (§4).
-- Doses: 0.05 / 0.5 / 5.0 µM, one dose per plate (§5).
-- Slice: the 8 lines above, in `configs/slice.yaml`.
+- Doses: 0.05 / 0.5 / 5.0 µM, one dose per plate; plates come in drug-sharing triplets (§5).
+- Slice: 8 lines in `configs/slice.yaml`, all with DepMap IDs, 6 tissues (§8).
+- Shard/metadata cell gap: shards hold only `pass_filter == 'full'` cells. Counting only
+  those in the metadata makes processed = atlas (1,246,672 / 1,246,672 on plate3).
+- Plates to build: plates 1, 2, 3 (same 92 drugs at the three doses).
 
-Still open:
-
-- Which of the cell-line IDs map cleanly to DepMap IDs? Tissue diversity not yet checked.
-- Why do expression shards contain only ~86% (median; range 47–99%) of the cells the
-  metadata lists per condition? Hypothesis: shards hold only cells passing `pass_filter`.
-  Not verified.
-- Which plates to build beyond plate3 (e.g. one plate per dose).
+Still open: none for Step 0.
 
 ---
 
@@ -215,8 +224,7 @@ Still open:
 - Verified facts: 4,419 parquet files in `data/`; 50 cell lines; 14 plates; 380 unique drugs; `DMSO_TF` appears as the strongest vehicle-control candidate.
 - Current status: Step 0 remote schema exploration is underway and the initial slice candidates are identified; the remaining work is to validate the exact control logic, dose levels, and DepMap mapping before defining `configs/slice.yaml`.
 
-## Status (2026-09-24)
+## Status (2026-09-25)
 
-Step 0 is complete except the DepMap/tissue check. Schema, join keys, controls, doses and
-shard layout are verified; the plate3 build in [phase1.md §13](../phase1.md) was built on
-these findings.
+Step 0 is complete. Schema, join keys, controls, doses, plate structure, shard layout and
+DepMap mapping are verified; the build in [phase1.md §13](../phase1.md) rests on them.

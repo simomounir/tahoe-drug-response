@@ -83,10 +83,10 @@ rather than letting phase 1 expand into it.
 
 ## Status
 
-- [x] Step 0 — remote schema exploration and slice sizing → `docs/step0_findings.md` (DepMap check still open)
-- [ ] Phase 1 — **in progress**: `make phase1` builds plate3 end to end with contracts
-  (741/744 conditions, 8/8 DMSO controls, logFC for 733). Remaining: DepMap IDs, gene
-  symbols, CI, more plates. See [`phase1.md` §13](phase1.md).
+- [x] Step 0 — remote schema exploration and slice sizing → `docs/step0_findings.md`
+- [x] Phase 1 — `make phase1` builds plates 1–3 (92 drugs × 3 doses, 8 lines, 6 tissues) with
+  contracts: 2,123/2,213 conditions, 24/24 DMSO controls, logFC for 2,099, 418 MB; 43 tests
+  in CI. See [`phase1.md` §13](phase1.md).
 - [ ] Phase 2
 - [ ] Phase 3
 - [ ] Phase 4
