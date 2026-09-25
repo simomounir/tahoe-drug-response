@@ -36,8 +36,10 @@ min_control_cells: 500
 control_drugs:
   - DMSO_TF
 
-# Plates to build. Each plate is one dose (see docs/step0_findings.md §5).
+# Plates 1-3 test the same 92 drugs at 0.05 / 0.5 / 5 uM (Adagrasib 0.05 uM is on every plate).
 plates:
+  - plate1
+  - plate2
   - plate3
 
 # null = report only; a number = fail the build if pseudobulk + logfc exceed it (MB = 1e6 bytes).

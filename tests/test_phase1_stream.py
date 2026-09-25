@@ -68,6 +68,38 @@ def test_streamed_pseudobulk_matches_in_memory_pseudobulk(tmp_path):
     assert (streamed["sum_counts"] > 0).all()
 
 
+def test_multi_plate_combine_matches_in_memory_and_cleans_up(tmp_path):
+    con = connect(temp_dir=tmp_path)
+    metadata = pd.concat([METADATA, METADATA.assign(plate="plate5")], ignore_index=True)
+    # Shard B straddles both plates, as real boundary shards do.
+    shard_a = SHARD_A
+    shard_b = pd.concat([SHARD_B, SHARD_A.assign(plate="plate5")], ignore_index=True)
+    gene_files, cell_files = [], []
+    for name, shard in (("a", shard_a), ("b", shard_b)):
+        shard_path = tmp_path / f"{name}.parquet"
+        shard.to_parquet(shard_path)
+        g, c = tmp_path / f"{name}_genes.parquet", tmp_path / f"{name}_cells.parquet"
+        aggregate_shard(con, shard_path, LINES, ["plate4", "plate5"], g, c)
+        gene_files.append(g)
+        cell_files.append(c)
+
+    out_path = tmp_path / "out" / "pseudobulk.parquet"
+    out_path.parent.mkdir()
+    per_condition = combine_partials(con, gene_files, cell_files, condition_lookup(metadata), out_path)
+    streamed = pd.read_parquet(out_path)
+
+    cells = pd.concat([shard_a, shard_b]).rename(columns={"cell_line_id": "cell_line"})
+    cells = cells[cells["cell_line"].isin(LINES) & cells["plate"].isin(["plate4", "plate5"])]
+    expected = build_pseudobulk(attach_condition_ids(cells, metadata)).sort_values(["condition_id", "gene"])
+
+    cols = ["condition_id", "gene", "sum_counts", "n_cells", "library_size"]
+    pd.testing.assert_frame_equal(
+        streamed[cols].reset_index(drop=True), expected[cols].reset_index(drop=True), check_dtype=False
+    )
+    assert len(per_condition) == 6
+    assert list(out_path.parent.iterdir()) == [out_path]
+
+
 def test_combine_partials_refuses_to_round_non_integer_counts(tmp_path):
     con = connect(temp_dir=tmp_path)
     shard_path = tmp_path / "a.parquet"

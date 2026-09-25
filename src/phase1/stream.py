@@ -73,6 +73,26 @@ def aggregate_shard(
     return int(kept)
 
 
+def _part_path(out_path: Path, *key: str) -> Path:
+    return out_path.with_name(f".{out_path.stem}.{'.'.join(key)}.part.parquet")
+
+
+def _merge_parts(con: duckdb.DuckDBPyConnection, parts: list[Path], out_path: Path) -> None:
+    """Concatenate parts into one file sorted by (condition_id, gene); the sort spills to disk."""
+    try:
+        con.execute(
+            f"COPY (SELECT * FROM read_parquet({sql_list(parts)}) ORDER BY condition_id, gene) "
+            f"TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})"
+        )
+    finally:
+        _remove(parts)
+
+
+def _remove(parts: list[Path]) -> None:
+    for part in parts:
+        part.unlink(missing_ok=True)
+
+
 def combine_partials(
     con: duckdb.DuckDBPyConnection,
     gene_files: list[Path],
@@ -80,48 +100,69 @@ def combine_partials(
     lookup: pd.DataFrame,
     out_path: Path,
 ) -> pd.DataFrame:
-    """Sum shard partials into condition-level pseudobulk (written to out_path); return per-condition totals."""
+    """Sum shard partials into condition-level pseudobulk (written to out_path); return per-condition totals.
+
+    Conditions never span plates, so each plate is reduced on its own to bound memory.
+    """
     keys = ["sample", "plate", "cell_line"]
-    con.register("lookup", lookup[keys + ["condition_id"]].drop_duplicates(keys))
-    con.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE pb AS
-        WITH sums AS (
-            SELECT l.condition_id, g.gene, SUM(g.value) AS sum_counts
-            FROM read_parquet({sql_list(gene_files)}) g JOIN lookup l USING (sample, plate, cell_line)
-            WHERE g.gene NOT IN ({", ".join(str(t) for t in SPECIAL_TOKENS)})
-            GROUP BY ALL
-        ),
-        cells AS (
-            SELECT l.condition_id, SUM(c.n_cells)::BIGINT AS n_cells
-            FROM read_parquet({sql_list(cell_files)}) c JOIN lookup l USING (sample, plate, cell_line)
-            GROUP BY ALL
-        )
-        SELECT s.condition_id, s.gene, s.sum_counts, c.n_cells,
-               SUM(s.sum_counts) OVER (PARTITION BY s.condition_id) AS library_size
-        FROM sums s JOIN cells c USING (condition_id)
-        """
-    )
+    lookup = lookup[keys + ["condition_id"]].drop_duplicates(keys)
+    parts, per_condition = [], []
+    try:
+        for plate in sorted(lookup["plate"].unique()):
+            parts.append(_part_path(out_path, plate))
+            per_condition.append(_combine_plate(con, gene_files, cell_files, lookup[lookup["plate"] == plate], plate, parts[-1]))
+    except BaseException:
+        _remove(parts)
+        raise
+    if not parts:
+        raise ValueError("combine_partials: lookup has no plates")
+    _merge_parts(con, parts, out_path)
+    return pd.concat(per_condition, ignore_index=True)
+
+
+def _combine_plate(
+    con: duckdb.DuckDBPyConnection,
+    gene_files: list[Path],
+    cell_files: list[Path],
+    lookup: pd.DataFrame,
+    plate: str,
+    out_path: Path,
+) -> pd.DataFrame:
+    con.register("lookup", lookup)
     # Math stays DOUBLE; cast at write time and fail rather than silently round a non-integer count.
     con.execute(
         f"""
         COPY (
+            WITH sums AS (
+                SELECT l.condition_id, g.gene, SUM(g.value) AS sum_counts
+                FROM read_parquet({sql_list(gene_files)}) g JOIN lookup l USING (sample, plate, cell_line)
+                WHERE g.plate = {sql_str(plate)} AND g.gene NOT IN ({", ".join(str(t) for t in SPECIAL_TOKENS)})
+                GROUP BY ALL
+            ),
+            cells AS (
+                SELECT l.condition_id, SUM(c.n_cells)::BIGINT AS n_cells
+                FROM read_parquet({sql_list(cell_files)}) c JOIN lookup l USING (sample, plate, cell_line)
+                WHERE c.plate = {sql_str(plate)}
+                GROUP BY ALL
+            ),
+            libs AS (SELECT condition_id, SUM(sum_counts) AS library_size FROM sums GROUP BY ALL),
+            pb AS (SELECT s.condition_id, s.gene, s.sum_counts, c.n_cells, b.library_size
+                   FROM sums s JOIN cells c USING (condition_id) JOIN libs b USING (condition_id))
             SELECT condition_id, gene::INTEGER AS gene,
                    CASE WHEN sum_counts = round(sum_counts) THEN sum_counts::INTEGER
                         ELSE error('pseudobulk: non-integer sum_counts for ' || condition_id || ', gene ' || gene) END AS sum_counts,
                    n_cells::INTEGER AS n_cells,
                    CASE WHEN library_size = round(library_size) THEN library_size::BIGINT
                         ELSE error('pseudobulk: non-integer library_size for ' || condition_id) END AS library_size
-            FROM pb ORDER BY condition_id, gene
+            FROM pb
         ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
         """
     )
-    per_condition = con.execute(
-        "SELECT condition_id, ANY_VALUE(n_cells) AS n_cells, ANY_VALUE(library_size) AS library_size FROM pb GROUP BY condition_id"
-    ).fetchdf()
-    con.execute("DROP TABLE pb")
     con.unregister("lookup")
-    return per_condition
+    return con.execute(
+        f"""SELECT condition_id, ANY_VALUE(n_cells) AS n_cells, ANY_VALUE(library_size) AS library_size
+            FROM read_parquet({sql_str(out_path)}) GROUP BY condition_id"""
+    ).fetchdf()
 
 
 def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, conditions: pd.DataFrame, out_path: Path) -> int:
@@ -134,12 +175,30 @@ def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, condition
     ok = conditions[conditions["qc_pass"]]
     usable_controls = set(ok.loc[ok["is_control"], "condition_id"])
     pairs = ok[~ok["is_control"] & ok["control_condition_id"].isin(usable_controls)]
+    # A treated condition and its control share plate and cell line, so each pair group is joined on its own.
+    parts = []
+    try:
+        for (plate, line), group in pairs.groupby(["plate", "cell_line"], sort=True):
+            parts.append(_part_path(out_path, plate, line))
+            _write_logfc_group(con, pseudobulk_path, group, parts[-1])
+    except BaseException:
+        _remove(parts)
+        raise
+    if parts:
+        _merge_parts(con, parts, out_path)
+    else:
+        _write_logfc_group(con, pseudobulk_path, pairs, out_path)
+    return int(len(pairs))
+
+
+def _write_logfc_group(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, pairs: pd.DataFrame, out_path: Path) -> None:
     con.register("pairs", pairs[["condition_id", "control_condition_id"]])
     con.execute(
         f"""
         COPY (
-            WITH pb AS (SELECT condition_id, gene, sum_counts::DOUBLE / library_size::DOUBLE * 1e6 AS cpm
-                        FROM read_parquet({sql_str(pseudobulk_path)})),
+            WITH wanted AS (SELECT condition_id FROM pairs UNION SELECT control_condition_id FROM pairs),
+            pb AS (SELECT condition_id, gene, sum_counts::DOUBLE / library_size::DOUBLE * 1e6 AS cpm
+                   FROM read_parquet({sql_str(pseudobulk_path)}) SEMI JOIN wanted USING (condition_id)),
             t AS (SELECT p.condition_id, p.control_condition_id, pb.gene, pb.cpm
                   FROM pairs p JOIN pb USING (condition_id)),
             c AS (SELECT p.condition_id, p.control_condition_id, pb.gene, pb.cpm
@@ -149,9 +208,7 @@ def write_logfc(con: duckdb.DuckDBPyConnection, pseudobulk_path: Path, condition
                    COALESCE(t.gene, c.gene) AS gene,
                    (ln(1 + COALESCE(t.cpm, 0)) - ln(1 + COALESCE(c.cpm, 0)))::FLOAT AS logfc
             FROM t FULL OUTER JOIN c ON t.condition_id = c.condition_id AND t.gene = c.gene
-            ORDER BY condition_id, gene
         ) TO {sql_str(out_path)} (FORMAT parquet, {PARQUET_OPTIONS})
         """
     )
     con.unregister("pairs")
-    return int(len(pairs))

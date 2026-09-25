@@ -78,6 +78,12 @@ def load_metadata_source(path_like: str | Path, selected_lines: list[str], pass_
     return df
 
 
+def partial_dir_for(plate: str, selected_lines: list[str]) -> Path:
+    """Per-plate cache, so adding a plate never invalidates plates already streamed."""
+    key = hashlib.sha1((plate + "|" + ",".join(sorted(selected_lines))).encode()).hexdigest()[:12]
+    return CACHE_DIR / "partials" / key
+
+
 def process_shards(shards: list[int], selected_lines: list[str], plates: list[str], partial_dir: Path) -> None:
     """Download each shard, reduce it to per-well gene sums, delete it. Already-done shards are skipped."""
     partial_dir.mkdir(parents=True, exist_ok=True)
@@ -149,16 +155,23 @@ def main() -> None:
 
     if not PLATE_MAP_PATH.exists():
         raise SystemExit(f"Missing {PLATE_MAP_PATH}. Run scripts/shard_plate_map.py first.")
-    shards = shards_for_plates(pd.read_parquet(PLATE_MAP_PATH), plates)
+    plate_map = pd.read_parquet(PLATE_MAP_PATH)
+    # A shard straddling two plates is reduced once per plate, filtered to that plate's cells.
+    shards_by_plate = {plate: shards_for_plates(plate_map, [plate]) for plate in plates}
     if args.max_shards is not None:
-        shards = shards[: args.max_shards]
-    print(f"{len(shards)} shards match {plates} (~{len(shards) * 85 / 1024:.1f} GB downloaded one at a time, each deleted after use)")
-    if args.dry_run or not shards:
+        shards_by_plate = {plate: shards[: args.max_shards] for plate, shards in shards_by_plate.items()}
+    for plate, shards in shards_by_plate.items():
+        todo = sum(not (partial_dir_for(plate, selected_lines) / f"shard_{s:05d}_cells.parquet").exists() for s in shards)
+        print(f"{plate}: {len(shards)} shards, {todo} to download (~{todo * 85 / 1024:.1f} GB, one at a time, each deleted after use)")
+    if args.dry_run or not any(shards_by_plate.values()):
         return
 
-    key = hashlib.sha1((",".join(plates) + "|" + ",".join(sorted(selected_lines))).encode()).hexdigest()[:12]
-    partial_dir = CACHE_DIR / "partials" / key
-    process_shards(shards, selected_lines, plates, partial_dir)
+    gene_files, cell_files = [], []
+    for plate, shards in shards_by_plate.items():
+        partial_dir = partial_dir_for(plate, selected_lines)
+        process_shards(shards, selected_lines, [plate], partial_dir)
+        gene_files += [partial_dir / f"shard_{s:05d}_genes.parquet" for s in shards]
+        cell_files += [partial_dir / f"shard_{s:05d}_cells.parquet" for s in shards]
 
     metadata = load_metadata_source(args.metadata, selected_lines)
     metadata = metadata[metadata["plate"].isin(plates)]
@@ -166,8 +179,8 @@ def main() -> None:
     con = _connect()
     result = build_outputs(
         con,
-        [partial_dir / f"shard_{s:05d}_genes.parquet" for s in shards],
-        [partial_dir / f"shard_{s:05d}_cells.parquet" for s in shards],
+        gene_files,
+        cell_files,
         metadata,
         config,
         Path(args.output_dir),
