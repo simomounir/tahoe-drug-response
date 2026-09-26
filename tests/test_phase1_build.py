@@ -99,11 +99,26 @@ def test_build_outputs_fails_when_a_cell_line_has_no_depmap_id(tmp_path):
         _run(tmp_path, _metadata(), config)
 
 
-def test_slice_config_has_depmap_id_and_tissue_for_every_selected_line():
+def test_build_outputs_accepts_a_declared_depmap_absence(tmp_path):
+    info = {**CONFIG["cell_line_info"], "L2": {"depmap_id": None, "depmap_absent": "not in DepMap", "tissue": "Bowel"}}
+    result, _ = _run(tmp_path, _metadata(), {**CONFIG, "cell_line_info": info})
+    conditions = result["conditions"]
+    assert conditions.loc[conditions["cell_line"] == "L2", "depmap_id"].isna().all()
+
+
+def test_build_outputs_rejects_an_empty_depmap_absence_reason(tmp_path):
+    info = {**CONFIG["cell_line_info"], "L2": {"depmap_id": None, "depmap_absent": " ", "tissue": "Bowel"}}
+    with pytest.raises(ContractError, match=r"without depmap_id: \['L2'\]"):
+        _run(tmp_path, _metadata(), {**CONFIG, "cell_line_info": info})
+
+
+def test_slice_config_has_depmap_id_or_declared_absence_and_tissue_for_every_selected_line():
     config = load_slice_config(SLICE_CONFIG)
     info = config["cell_line_info"]
+    assert len(config["selected_cell_lines"]) == len(set(config["selected_cell_lines"]))
     for line in config["selected_cell_lines"]:
-        assert info[line]["depmap_id"].startswith("ACH-"), line
+        depmap_id = info[line].get("depmap_id")
+        assert (depmap_id or "").startswith("ACH-") or (info[line].get("depmap_absent") or "").strip(), line
         assert info[line]["tissue"], line
 
 
@@ -144,3 +159,19 @@ def test_build_reports_stage_timings_outside_the_qc_report(tmp_path):
         assert stage["seconds"] >= 0
         assert stage["peak_rss_mb"] > 0
     assert "seconds" not in (tmp_path / "qc.md").read_text()
+
+
+@pytest.mark.parametrize("rows_per_bucket", [1, 3, 10_000_000])
+def test_pseudobulk_duplicate_check_is_exact_in_any_number_of_buckets(tmp_path, rows_per_bucket):
+    from phase1.contracts import validate_pseudobulk
+
+    result, out = _run(tmp_path, _metadata())
+    conditions = result["conditions"]
+    con = connect()
+    clean = out / "pseudobulk.parquet"
+    validate_pseudobulk(con, clean, conditions, rows_per_bucket=rows_per_bucket)
+
+    dup = tmp_path / "dup.parquet"
+    con.execute(f"COPY (SELECT * FROM '{clean}' UNION ALL (SELECT * FROM '{clean}' LIMIT 1)) TO '{dup}' (FORMAT parquet)")
+    with pytest.raises(ContractError, match="1 duplicate"):
+        validate_pseudobulk(con, dup, conditions, rows_per_bucket=rows_per_bucket)

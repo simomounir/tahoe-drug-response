@@ -45,25 +45,42 @@ def check_parquet_schema(con: duckdb.DuckDBPyConnection, path: Path, schema: dic
     _check(_scalar(con, f"SELECT {nulls} FROM read_parquet({sql_str(path)})") == 0, f"{path.name}: contains nulls")
 
 
-def validate_conditions(conditions: pd.DataFrame) -> None:
+def validate_conditions(conditions: pd.DataFrame, depmap_absent: frozenset[str] = frozenset()) -> None:
+    """depmap_absent: lines whose missing DepMap ID is declared in the config with a reason."""
     missing = set(CONDITIONS_REQUIRED) - set(conditions.columns)
     _check(not missing, f"conditions: missing columns {sorted(missing)}")
     _check(conditions["condition_id"].is_unique, "conditions: condition_id is not unique")
-    no_depmap = sorted(conditions.loc[conditions["depmap_id"].isna(), "cell_line"].unique())
-    _check(not no_depmap, f"conditions: cell line(s) without depmap_id: {no_depmap}")
-    _check(conditions[CONDITIONS_REQUIRED].notna().all().all(), "conditions: nulls in required columns")
+    no_depmap = conditions["depmap_id"].isna()
+    undeclared = sorted(set(conditions.loc[no_depmap, "cell_line"]) - depmap_absent)
+    _check(not undeclared, f"conditions: cell line(s) without depmap_id: {undeclared}")
+    required = [c for c in CONDITIONS_REQUIRED if c != "depmap_id"]
+    _check(conditions[required].notna().all().all(), "conditions: nulls in required columns")
     _check((conditions["n_cells"] >= 0).all(), "conditions: negative n_cells")
     orphans = conditions[~conditions["is_control"] & conditions["control_condition_id"].isna()]
     _check(orphans.empty, f"conditions: {len(orphans)} treated condition(s) have no control on their plate")
 
 
-def validate_pseudobulk(con: duckdb.DuckDBPyConnection, path: Path, conditions: pd.DataFrame) -> None:
+def validate_pseudobulk(
+    con: duckdb.DuckDBPyConnection, path: Path, conditions: pd.DataFrame, rows_per_bucket: int = 20_000_000
+) -> None:
+    """rows_per_bucket bounds memory of the duplicate check (one hash group per row); it does not change the result."""
     check_parquet_schema(con, path, PSEUDOBULK_SCHEMA)
     src = f"read_parquet({sql_str(path)})"
     _check(_scalar(con, f"SELECT COUNT(*) FROM {src} WHERE sum_counts < 0") == 0, f"{path.name}: negative counts")
     tokens = ", ".join(str(t) for t in SPECIAL_TOKENS)
     _check(_scalar(con, f"SELECT COUNT(*) FROM {src} WHERE gene IN ({tokens})") == 0, f"{path.name}: marker token present")
-    dup = _scalar(con, f"SELECT COUNT(*) FROM (SELECT condition_id, gene FROM {src} GROUP BY ALL HAVING COUNT(*) > 1)")
+    # Duplicates share a condition_id, so bucketing by its hash keeps the check exact while each
+    # GROUP BY holds only ~rows_per_bucket groups (a single pass OOMs at 2 GB on ~300M rows).
+    n_rows = _scalar(con, f"SELECT COUNT(*) FROM {src}")
+    n_buckets = max(1, -(-n_rows // rows_per_bucket))
+    dup = sum(
+        _scalar(
+            con,
+            f"SELECT COUNT(*) FROM (SELECT condition_id, gene FROM {src} "
+            f"WHERE hash(condition_id) % {n_buckets} = {bucket} GROUP BY ALL HAVING COUNT(*) > 1)",
+        )
+        for bucket in range(n_buckets)
+    )
     _check(dup == 0, f"{path.name}: {dup} duplicate (condition_id, gene) rows")
 
     observed = con.execute(f"SELECT condition_id, ANY_VALUE(n_cells) AS n FROM {src} GROUP BY condition_id").fetchdf()

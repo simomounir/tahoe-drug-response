@@ -75,7 +75,8 @@ def build_outputs(
     summary["n_logfc_conditions"] = n_logfc
     end_stage("logfc")
 
-    validate_conditions(conditions)
+    depmap_absent = frozenset(line for line, info in line_info.items() if str((info or {}).get("depmap_absent") or "").strip())
+    validate_conditions(conditions, depmap_absent)
     validate_pseudobulk(con, pseudobulk_path, conditions)
     validate_logfc(con, logfc_path, n_logfc)
 

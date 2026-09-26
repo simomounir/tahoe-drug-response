@@ -16,7 +16,7 @@ def test_load_slice_config_reads_selected_cell_lines():
 
     assert config["status"] == "validated_candidate"
     assert config["selected_cell_lines"][0] == "CVCL_0546"
-    assert len(config["selected_cell_lines"]) == 8
+    assert len(config["selected_cell_lines"]) == 50
 
 
 def test_parse_drugname_drugconc_extracts_dose_and_unit():

@@ -83,11 +83,11 @@ rather than letting phase 1 expand into it.
 ## Status
 
 - [x] Step 0 — remote schema exploration and slice sizing → `docs/step0_findings.md`
-- [x] Phase 1 — `make phase1` builds plates 1–3 (92 drugs × 3 doses, 8 lines, 6 tissues) with
-  contracts: 2,123/2,213 conditions, 24/24 DMSO controls, logFC for 2,099, 418 MB; 43 tests
+- [x] Phase 1 — `make phase1` builds plates 1–3 (92 drugs × 3 doses). Since P3.0: all 50 lines,
+  13 tissues, 12,259/13,772 conditions, 133/150 DMSO controls, logFC for 11,535, 2.06 GB; 55 tests
   in CI. See [`phase1.md` §13](phase1.md).
 - [x] Phase 2 — native arm64 `.venv` (identical outputs, rebuild 530 s → 344 s median);
   baseline with method in [`docs/performance_baseline.md`](docs/performance_baseline.md).
-- [ ] Phase 3
+- [ ] Phase 3 — features; spec [`docs/superpowers/specs/2026-09-26-phase3-features-design.md`](docs/superpowers/specs/2026-09-26-phase3-features-design.md). P3.0 (50-line slice) done.
 - [ ] Phase 4
 - [ ] Phase 5
