@@ -156,7 +156,12 @@ The build fails with `ContractError` when:
 1. A slice drug is neither `featurizable` nor carries an `exclusion_reason`.
 2. A feature column of a featurizable drug or of a cell line contains null, NaN or inf.
 3. `drug_groups` does not contain exactly the slice's featurizable drugs, or a drug has more than one cluster.
-4. A slice cell line has no DepMap ID, or its ID is absent from the 24Q4 expression file (no imputation).
+4. A slice cell line has no DepMap ID, or its ID is absent from the 24Q4 expression file (no imputation),
+   **unless the gap is declared**: `depmap_absent: <reason>` in `configs/slice.yaml`, or
+   `cells.expression_proxy` / `cells.expression_absent` in `configs/features.yaml`. Declared gaps give
+   null features and a `feature_gap` reason in `condition_features`; undeclared gaps fail.
+   *(Amended 2026-09-26: owner decisions for hTERT-HPNE (no DepMap), HepG2/C3A (HepG2 proxy) and
+   COLO 205 (no 24Q4 expression).)*
 5. `condition_features` does not have exactly one row per condition in `conditions.parquet`.
 6. PCA loadings on disk do not reproduce the stored projections.
 
@@ -191,7 +196,9 @@ and the P3.1 report.
   conditions will fail `min_cells_per_condition`. Reported per line by the QC report; not a failure.
 - **DepMap coverage.** If any Tahoe line is absent from 24Q4 expression, contract 4 fails the build.
   Resolution then is an explicit decision (drop the line from cell-feature models, or a newer release),
-  not imputation.
+  not imputation. *Happened for three lines (2026-09-26): hTERT-HPNE has no DepMap entry; HepG2/C3A and
+  COLO 205 have mutations but no 24Q4 expression. Declared per contract 4: C3A uses parent HepG2's
+  expression; the other two carry null features and are marked by `feature_gap`.*
 - **Tahoe DE table semantics.** If its control is not plate-matched DMSO, P3.1 compares different
   things; the report must say so before any threshold is applied.
 - **Disk.** Partials for 50 lines estimated 21–40 GB (394 GB free).

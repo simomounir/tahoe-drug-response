@@ -5,3 +5,4 @@ numpy==2.5.3
 huggingface_hub==1.32.0
 pytest==9.1.1
 PyYAML==6.0.3
+rdkit==2026.3.6

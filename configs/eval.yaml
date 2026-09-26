@@ -1,0 +1,11 @@
+# Evaluation settings fixed before any model exists (evaluation.md §5.1, amendment A5, 2026-09-26).
+de_genes:
+  source: tahoe_deseq2          # metadata/pseudobulk_differential_expression, plate-matched DMSO
+  padj_below: 0.05
+  top_n: 200
+  rank_by: padj                 # ascending; ties broken by larger |log2FoldChange|
+  effect_size_threshold: null   # none: padj and the cap define the set
+  missing_condition: exclude_and_count
+min_de_genes: 20
+split_eligibility:
+  min_fraction_treated_with_logfc: 0.5   # amendment A2: excludes 5 of 50 lines

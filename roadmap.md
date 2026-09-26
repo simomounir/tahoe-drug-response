@@ -88,6 +88,6 @@ rather than letting phase 1 expand into it.
   in CI. See [`phase1.md` §13](phase1.md).
 - [x] Phase 2 — native arm64 `.venv` (identical outputs, rebuild 530 s → 344 s median);
   baseline with method in [`docs/performance_baseline.md`](docs/performance_baseline.md).
-- [ ] Phase 3 — features; spec [`docs/superpowers/specs/2026-09-26-phase3-features-design.md`](docs/superpowers/specs/2026-09-26-phase3-features-design.md). P3.0 (50-line slice) done.
+- [x] Phase 3 — features for 13,071/13,772 conditions (drugs: RDKit fingerprints + descriptors, similarity groups; cells: DepMap 24Q4 PCA + mutation/driver flags), `make features` with contracts; target cross-checked against Tahoe DESeq2 (197/200, median sign agreement 1.00); evaluation rules amended (A1–A7). Spec [`docs/superpowers/specs/2026-09-26-phase3-features-design.md`](docs/superpowers/specs/2026-09-26-phase3-features-design.md).
 - [ ] Phase 4
 - [ ] Phase 5

@@ -1,0 +1,30 @@
+depmap:
+  release: 24Q4
+  figshare_article: 27993248
+  files: [Model.csv, OmicsExpressionProteinCodingGenesTPMLogp1.csv,
+          OmicsSomaticMutationsMatrixDamaging.csv, OmicsSomaticMutationsMatrixHotspot.csv]
+drugs:
+  morgan_radius: 2
+  morgan_n_bits: 2048
+  butina_similarity: 0.6
+  report_similarities: [0.5, 0.6, 0.7]
+cells:
+  pca_components: 10
+  mutation_min_frequency: 0.05
+  driver_min_lines: 2
+  # Owner decision 2026-09-26 (P3.4 fix round 1): two slice lines have a DepMap ID and mutation
+  # data but no row of their own in the 24Q4 expression file. No imputation elsewhere -- these are
+  # the only two declared exceptions; any other line missing from expression fails the build.
+  expression_proxy:
+    CVCL_1098: {model: ACH-000739, reason: "C3A is a clonal derivative of HepG2; ACH-001021 has no 24Q4 expression"}
+  expression_absent:
+    CVCL_0218: "no expression profile in DepMap 24Q4 (ACH-001039)"
+crosscheck:
+  n_conditions: 200
+  seed: 20260926
+  padj: 0.05
+  min_median_sign_agreement: 0.90
+  network_cap_gb: 25  # owner decision 2026-09-26: cover all sampled conditions (spec §5 had no cap key; brief said 5 GB)
+tahoe:
+  repo: tahoebio/Tahoe-100M
+  revision: 2dc57900b7981cfcf5e211527169a0b006546a95  # dataset commit of 2025-07-23; pins drug/cell-line metadata

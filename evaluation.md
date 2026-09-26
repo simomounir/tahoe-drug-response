@@ -50,6 +50,13 @@ Four splits, all reported in every results table, in this order:
 | `unseen_cell_line` | All conditions for a set of cell lines | Biological context generalization |
 | `both_unseen` | Compounds × cell lines, neither seen | The honest headline number |
 
+**Slice (amendment A2).** Plates 1–3: 92 compounds × 3 doses × 50 cell lines (13 tissues),
+13,772 conditions including 150 DMSO controls, logFC for 11,535 treated conditions
+(`phase1.md` §13). Only cell lines with logFC for at least
+50% of their treated conditions are eligible to be held out or trained on. By this rule 45 lines
+are eligible; CVCL_1531, CVCL_1571, CVCL_1577 (0%), CVCL_1716 (27%) and CVCL_1715 (29%) are excluded
+before any split is drawn. The next-lowest line has 61%, so the cut falls in a natural gap.
+
 Split assignment is deterministic given a seed, stored to disk, and versioned. The same
 split files are used by every model. Re-drawing splits after seeing results is forbidden.
 
@@ -63,9 +70,12 @@ These are the ways this evaluation can quietly become meaningless. Each must be 
 in code and covered by a test.
 
 - **Dose grouping.** All doses of the same compound live on the same side of a drug split.
-- **Scaffold grouping.** Compounds are grouped by molecular scaffold (Bemis–Murcko or
-  equivalent); an entire scaffold group moves together. Holding out a compound while its
-  close analogue remains in training tests memorization, not generalization.
+- **Similarity grouping** *(amendment A1; replaced "Scaffold grouping", see §12)*. Compounds
+  are grouped by Butina clustering on count-Tanimoto similarity ≥ 0.6 over Morgan count
+  fingerprints (`data/features/drug_groups.parquet`, `cluster_id`); an entire cluster moves
+  together. Every drug-split report states each test compound's highest Tanimoto similarity to
+  any training compound. Holding out a compound while its close analogue remains in training
+  tests memorization, not generalization.
 - **Control leakage.** Control profiles for a held-out cell line are not available at
   training time in `unseen_cell_line`. If the model needs a control profile to predict,
   that dependency is documented as a limitation and evaluated separately.
@@ -75,10 +85,19 @@ in code and covered by a test.
   from any aggregate computed over the test conditions.
 - **Cell line features.** DepMap features are static and external, so they are permitted
   for held-out cell lines. This is a deliberate choice: it mirrors the real use case, where
-  a new cell line has been characterized but not yet screened.
+  a new cell line has been characterized but not yet screened. *(Amendment A3)* Source is
+  DepMap 24Q4 (PCA fitted on all DepMap lines, never on the slice). Declared gaps: hTERT-HPNE
+  (non-cancer, no DepMap entry) and COLO 205 (no 24Q4 expression) have no or partial cell
+  features; HepG2/C3A uses its parent HepG2's expression. Models that use cell features are
+  scored on conditions with `features_complete`; the 551 treated conditions of the two gap
+  lines are reported separately, never imputed.
+- **Scoring set** *(amendment A7)*. Every model, baselines included, is trained and scored on the
+  same conditions: eligible lines (A2) ∩ `features_complete` ∩ conditions with a Tahoe DE set
+  (A5). hTERT-HPNE and COLO 205 are therefore never drawn as held-out lines. Their conditions are
+  scored in a separate table, only for models that do not use cell features.
 
-A test asserts that no `condition_id`, compound, scaffold or cell line appears on both
-sides of any split.
+A test asserts that no `condition_id`, compound, similarity cluster or cell line appears on
+both sides of any split.
 
 ## 5. Metrics
 
@@ -92,6 +111,17 @@ DE genes are derived from the **ground truth** (treated vs matched control), per
 with a fixed rule recorded in `configs/eval.yaml` (test, effect-size threshold, significance
 threshold, and a cap of top *n* by absolute effect). This set is used for scoring only and
 is never made available to a model as input.
+
+*(Amendment A5)* The test is Tahoe's published per-condition DESeq2 result
+(`metadata/pseudobulk_differential_expression`, plate-matched DMSO control): DE genes are those
+with `padj < 0.05`, capped at the 200 with the smallest `padj` (ties broken by larger
+|log2FoldChange|), with no separate effect-size threshold, and `min_de_genes = 20`
+(`configs/eval.yaml`). Ranking by `padj` rather than by unshrunk |log2FoldChange| avoids favouring
+noisy low-count genes. A condition with no row in Tahoe's table has no DE set: it is excluded from
+DE-restricted metrics and counted in the report, like the `min_de_genes` exclusion. Our own logFC agrees with that table in direction for a median 100% (worst
+96.3%) of its significant genes over 197 sampled conditions (`docs/target_crosscheck.md`), so the
+two describe the same effect; a single pseudobulk per condition has no replicates for a test of
+our own.
 
 Conditions with fewer than `min_de_genes` DE genes are excluded from DE-restricted metrics
 and counted separately in the report. This exclusion is reported, not silent.
@@ -132,7 +162,7 @@ Implemented in this order, all scored on all splits, all kept in the final resul
 | 1 | `global_mean` | Predict the mean logFC across all training conditions |
 | 2 | `drug_mean` | Mean logFC of that drug across training cell lines (undefined for unseen drugs — report coverage) |
 | 3 | `cell_mean` | Mean logFC of that cell line across training drugs |
-| 4 | `nearest_chemical` | Response of the most similar training compound (Tanimoto on fingerprints), in the same cell line where available |
+| 4 | `nearest_chemical` | Response of the most similar training compound (count-Tanimoto on Morgan radius-2, 2,048-slot count fingerprints — the same measure as the similarity groups, amendment A4), in the same cell line where available |
 | 5 | `ridge` | Ridge regression from [chemistry features ⊕ cell line features] to the logFC vector |
 
 Baseline 0 is not a joke. A model that fails to beat "nothing happens" on a given metric
@@ -217,15 +247,51 @@ Listed explicitly so that a reviewer can see they were considered:
 Any change to this document after results exist is logged here: date, what changed, why,
 and what the rule was before.
 
-_(none yet)_
+All amendments below were made on **2026-09-26, before any model, baseline or split existed**
+(phase 3 design, `docs/superpowers/specs/2026-09-26-phase3-features-design.md`).
+
+- **A1 — §4.1 drug grouping.** *Before:* "Compounds are grouped by molecular scaffold
+  (Bemis–Murcko or equivalent); an entire scaffold group moves together." *Now:* Butina clusters
+  at count-Tanimoto ≥ 0.6. *Why:* all 92 slice compounds have distinct Bemis–Murcko scaffolds, so
+  the old rule was a no-op; scaffold splits are known to overestimate performance (Guo et al.
+  2024, arXiv:2406.00873). *Observed:* at 0.6 only one pair merges (EX229 / MK-3903, 0.65); the next
+  most similar pair is 0.55, so near-duplicate leakage across drug splits is minimal and
+  `unseen_drug` is close to holding out single compounds.
+- **A2 — §4 slice and line eligibility.** *Before:* no coverage rule; §13 assumed ~380
+  compounds. *Now:* the 92-compound, 50-line slice, and lines need logFC for ≥ 50%
+  of treated conditions to enter any split. *Why:* five lines have logFC for 0–29% of treated
+  conditions (too few cells, or no QC-passing control on most plates) and would add held-out
+  lines with few or no scoreable conditions.
+- **A3 — §4.1 cell line features.** *Before:* "DepMap features … are permitted for held-out cell
+  lines." *Now:* same, plus the declared gaps and the rule that gap conditions are reported
+  separately. *Why:* three of the 50 lines are not fully covered by DepMap 24Q4 (owner decisions).
+- **A4 — §6 baseline 4.** *Before:* "Tanimoto on fingerprints". *Now:* count-Tanimoto on the
+  phase 3 Morgan count fingerprints. *Why:* one similarity measure for grouping and baseline.
+  *Note:* maximum pairwise similarity in the slice is 0.65, so this baseline has little signal
+  to use.
+- **A5 — §5.1 DE genes.** *Before:* "a fixed rule recorded in `configs/eval.yaml` (test,
+  effect-size threshold, significance threshold, cap)", with the test left open (§13). *Now:*
+  Tahoe's DESeq2 `padj < 0.05`, top 200 by smallest `padj`, `min_de_genes = 20`; conditions
+  without a Tahoe row are excluded and counted. *Why:* the phase 3
+  cross-check (P3.1) passed its pre-set rule (median sign agreement ≥ 0.90) at 1.00 on 197/200
+  conditions, and our single pseudobulk per condition has no replicates for a test of its own.
+  *Cost:* scoring needs Tahoe's DE rows for plates 1–3 of every eligible line (~22 GB streamed
+  once, as in the cross-check).
+- **A7 — §4.1 scoring set.** *Before:* not stated. *Now:* all models are trained and scored on
+  eligible ∩ `features_complete` ∩ has-DE-set; the two gap lines are never held out and are
+  reported separately. *Why:* otherwise models that use cell features and models that don't
+  would be scored on different conditions and could not be compared (final review, 2026-09-26).
+- **A6 — positioning.** Results are compared with this project's own baselines only. Published
+  Tahoe-100M results use the full atlas (50 lines × 379 compounds, other splits) and are not
+  comparable to this 92-compound slice.
 
 ## 13. Open questions
 
-- Which DE test is appropriate for pseudobulk profiles with varying cell counts per
-  condition — and does the cell count need to enter the weighting?
+- ~~Which DE test is appropriate for pseudobulk profiles with varying cell counts per
+  condition?~~ Answered 2026-09-26: Tahoe's DESeq2 table (amendment A5).
 - Should `discrimination` be computed within cell line, across all held-out conditions,
   or both? (Both is probably right; within-cell-line is the harder version.)
-- Is scaffold splitting too aggressive given only ~380 compounds? Check how many scaffold
-  groups exist before committing — if the count is low, the unseen-drug split may be
-  unstable, and that instability must be reported.
+- ~~Is scaffold splitting too aggressive given only ~380 compounds?~~ Answered 2026-09-26: the
+  92 slice compounds have 92 distinct Bemis–Murcko scaffolds, so scaffold grouping groups
+  nothing; replaced by similarity grouping (amendment A1).
 - How many conditions end up in `both_unseen`, and is that enough for stable intervals?

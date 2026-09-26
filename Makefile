@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run
+.PHONY: test phase1 phase1-dry-run features
 
 test:
 	python -m pytest -q
@@ -15,3 +15,19 @@ phase1: data/cache/shard_plate_map.parquet data/pseudobulk/genes.parquet
 
 phase1-dry-run: data/cache/shard_plate_map.parquet
 	python scripts/run_phase1.py --dry-run
+
+# Phase 3 features: drugs, drug_groups, cells, depmap_pca + the condition_features view,
+# contracts 1-6 and reports/features.md. From a clean checkout this fetches the pinned Tahoe
+# metadata and DepMap 24Q4, and builds phase 1 first if its conditions table is missing.
+data/cache/hf/metadata/drug_metadata.parquet data/cache/cell_line_metadata.parquet:
+	python scripts/fetch_tahoe_metadata.py
+
+data/cache/depmap/OmicsExpressionProteinCodingGenesTPMLogp1.parquet:
+	python scripts/fetch_depmap.py
+
+data/pseudobulk/conditions.parquet:
+	$(MAKE) phase1
+
+features: data/pseudobulk/conditions.parquet data/cache/hf/metadata/drug_metadata.parquet \
+          data/cache/cell_line_metadata.parquet data/cache/depmap/OmicsExpressionProteinCodingGenesTPMLogp1.parquet
+	python scripts/build_features.py
