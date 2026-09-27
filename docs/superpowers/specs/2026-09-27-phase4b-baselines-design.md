@@ -33,6 +33,8 @@ decision 2026-09-27), the neural model (4c), plots (phase 5), new dependencies.
 | B4 | `ridge` in **numpy via one SVD per fit**, all 18,995 genes predicted directly | No scikit-learn/scipy in the env; one SVD gives the solution for every α; a compressed target would cap what ridge can express and lower the bar | A few seconds per fit |
 | B5 | `ridge` α chosen from a fixed log grid by **validation median `de_pearson`** (the headline metric), then refit on train + val | Tuning on the metric the claim is stated in; val never touches test | α tuned to one metric |
 | B6 | Models see the metric only through a callback `TrainData.val_score(pred_val) -> float` | Keeps metric code in `metrics.py`; a model cannot peek at DE sets of test conditions | None |
+| B7 | *(amendment 2026-09-27, final review, before any baseline result was read)* `Ipc` enters ridge as `log1p(Ipc)` | Over the 92 drugs `Ipc` spans 8.6e2–2.1e14; raw and standardised it is a flag for 5 drugs and extrapolates wildly for held-out drugs, handicapping the reference model. It is the only continuous descriptor with that tail (others with max \|z\| > 8 are single-drug fragment counts) | Other descriptors left raw |
+| B8 | *(post-hoc amendment 2026-09-27, owner decision, after the first ridge results were seen)* `ridge` fits the **residual from the per-dose mean** of its fitting rows (the `global_mean` prediction) and adds it back | First run: on `both_unseen` α hit the grid maximum (1e6) in 3/5 repeats and ridge (0.597) scored below `global_mean` (0.666); an isotropic penalty shrinks the dose term with ~2,340 features, so full shrinkage gave the all-dose mean. With B8 full shrinkage is exactly `global_mean`. Makes the reference model stronger, never weaker, so the change cannot favour the neural model | The first-run ridge numbers are superseded; recorded here |
 
 ## 4. The models (`src/phase4/baselines.py`)
 
@@ -51,7 +53,7 @@ For a test condition (line L, drug D, dose d); every mean is over training rows'
 between the test drugs and the training drugs (at most 92 × 92) from `morgan_counts`, since a test drug
 may be absent from the training rows.
 
-**Ridge features:** `log1p(morgan_counts)` (2,048), the RDKit descriptor columns, `log10_dose_um`,
+**Ridge features:** `log1p(morgan_counts)` (2,048), the RDKit descriptor columns (`Ipc` as `log1p`, B7), `log10_dose_um`,
 `pc_*` (10), `dmg_*`, `hot_*`, `drv_*` flags — about 2,340 columns. Standardised with the mean and SD of
 the fitting rows; zero-SD columns are dropped. Targets are centred on the fitting rows' mean, which is
 the intercept. With `X = U S Vᵀ`, `W(α) = V diag(s / (s² + α)) Uᵀ Y`. Grid: α = 10^k, k = −2, −1.5, …, 6

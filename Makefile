@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features eval-data eval results
+.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results
 
 test:
 	python -m pytest -q
@@ -40,6 +40,10 @@ eval-data: features
 MODEL ?= dummy
 eval:
 	python scripts/run_eval.py --model $(MODEL)
+
+# Every registered model (dummy + phase 4b baselines), then reports/results.md.
+eval-all:
+	python scripts/run_eval.py --all
 
 results:
 	python scripts/run_eval.py --report

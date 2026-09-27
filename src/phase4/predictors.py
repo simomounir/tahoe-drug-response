@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,7 @@ class TrainData:
     targets: np.ndarray  # [n_rows, n_genes] logFC, same row order as features
     genes: list[str]
     part: np.ndarray  # "train" or "val" per row
+    val_score: Callable[[np.ndarray], float] | None = None  # median val de_pearson of predictions for the val rows
 
 
 class Predictor(Protocol):
@@ -32,4 +33,13 @@ class DummyPredictor:
         return np.zeros((len(conditions), self.n_genes), dtype=np.float32)
 
 
-PREDICTORS: dict[str, type] = {"dummy": DummyPredictor}
+from phase4 import baselines  # noqa: E402  (baselines only type-hints TrainData, so no import cycle)
+
+PREDICTORS: dict[str, type] = {
+    "dummy": DummyPredictor,
+    "global_mean": baselines.GlobalMean,
+    "drug_mean": baselines.DrugMean,
+    "cell_mean": baselines.CellMean,
+    "nearest_chemical": baselines.NearestChemical,
+    "ridge": baselines.RidgeBaseline,
+}

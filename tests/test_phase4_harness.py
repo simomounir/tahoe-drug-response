@@ -96,3 +96,44 @@ def test_harness_rejects_a_wrong_shape_predictor(tmp_path, monkeypatch):
     monkeypatch.setitem(PREDICTORS, "bad", Bad)
     with pytest.raises(ContractError, match="shape"):
         harness.evaluate("bad", CFG, _write_eval_dir(tmp_path), tmp_path / "results")
+
+
+class _Probe:
+    seen: dict = {}
+
+    def fit(self, train):
+        is_val = train.part == "val"
+        _Probe.seen["score"] = train.val_score(np.asarray(train.targets[is_val]))  # perfect prediction
+        with pytest.raises(ContractError, match="shape"):
+            train.val_score(np.zeros((int(is_val.sum()) + 1, len(train.genes)), np.float32))
+        self.n = len(train.genes)
+
+    def predict(self, conditions):
+        return np.zeros((len(conditions), self.n), np.float32)
+
+    def info(self):
+        return {"fallback_rate": 0.25}
+
+
+def test_harness_passes_val_scorer_and_records_model_info(tmp_path, monkeypatch):
+    monkeypatch.setitem(PREDICTORS, "probe", _Probe)
+    out = harness.evaluate("probe", CFG, _write_eval_dir(tmp_path), tmp_path / "results")
+    assert _Probe.seen["score"] == pytest.approx(1.0)
+    info = json.loads((out / "results.json").read_text())["model_info"]
+    assert len(info) == 2 * 4 and all(i["fallback_rate"] == 0.25 and {"repeat", "split"} <= set(i) for i in info)
+
+
+def test_harness_passes_model_kwargs_from_config(tmp_path, monkeypatch):
+    class _Kw(DummyPredictor):
+        def __init__(self, k):
+            _Kw.k = k
+
+    monkeypatch.setitem(PREDICTORS, "kw", _Kw)
+    harness.evaluate("kw", {**CFG, "models": {"kw": {"k": 7}}}, _write_eval_dir(tmp_path), tmp_path / "results")
+    assert _Kw.k == 7
+
+
+@pytest.mark.parametrize("info,match", [({"fallback_rate": 1.5}, "fallback_rate"), ({"x": object()}, "JSON")])
+def test_model_info_contract(info, match):
+    with pytest.raises(ContractError, match=match):
+        contracts.validate_model_info(info)

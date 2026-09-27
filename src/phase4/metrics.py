@@ -38,17 +38,34 @@ def _normalized_rank(dist: np.ndarray, own: int, candidates: np.ndarray) -> tupl
     return float(rank), float(closer == 0 and ties == 0)
 
 
+def de_index(genes: list[str], de_sets: pd.DataFrame, condition_ids: set[str] | None = None) -> dict[str, np.ndarray]:
+    """Column indices of each condition's DE genes in rank order (genes outside `genes` skipped)."""
+    col = {g: i for i, g in enumerate(genes)}
+    if condition_ids is not None:
+        de_sets = de_sets[de_sets["condition_id"].isin(condition_ids)]
+    de_sorted = de_sets.sort_values(["condition_id", "rank"])
+    return {
+        cid: np.array([col[g] for g in grp["gene_symbol"] if g in col], dtype=np.int64)
+        for cid, grp in de_sorted.groupby("condition_id", sort=False)
+    }
+
+
+def de_pearson(pred: np.ndarray, truth: np.ndarray, de_idx: dict[str, np.ndarray], condition_ids: list[str]) -> np.ndarray:
+    """`de_pearson` alone, for model tuning on validation rows (phase 4b B5); same values as `score_conditions`."""
+    out = np.full(len(condition_ids), np.nan)
+    for i, cid in enumerate(condition_ids):
+        de = de_idx.get(cid, np.array([], dtype=np.int64))
+        if len(de) > 1:
+            out[i] = _pearson(pred[i][de], truth[i][de])
+    return out
+
+
 def score_conditions(
     pred: np.ndarray, truth: np.ndarray, genes: list[str], de_sets: pd.DataFrame, conditions: pd.DataFrame, cfg: dict
 ) -> pd.DataFrame:
     """One row per condition (in `conditions` order); `pred` and `truth` rows follow the same order."""
-    col = {g: i for i, g in enumerate(genes)}
-    de_sorted = de_sets.sort_values(["condition_id", "rank"])
-    de_idx = {
-        cid: np.array([col[g] for g in grp["gene_symbol"] if g in col], dtype=np.int64)
-        for cid, grp in de_sorted.groupby("condition_id", sort=False)
-    }
     ids = list(conditions["condition_id"])
+    de_idx = de_index(genes, de_sets, set(ids))
     topk = cfg["metrics"]["topk"]
 
     # Discrimination: Pearson distance over genes that are DE in at least one of these conditions.

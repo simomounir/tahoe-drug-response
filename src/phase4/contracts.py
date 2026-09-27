@@ -1,5 +1,7 @@
-"""Phase 4a contracts (spec §6). A violation raises phase1.contracts.ContractError."""
+"""Phase 4a contracts (spec §6) and phase 4b additions (4b spec §6). A violation raises phase1.contracts.ContractError."""
 from __future__ import annotations
+
+import json
 
 import numpy as np
 import pandas as pd
@@ -43,6 +45,17 @@ def validate_prediction(pred: np.ndarray, n_rows: int, n_genes: int) -> None:
     """Contract 4: exactly (test conditions x gene universe), finite."""
     _check(pred.shape == (n_rows, n_genes), f"prediction: shape {pred.shape}, expected {(n_rows, n_genes)}")
     _check(bool(np.isfinite(pred).all()), "prediction: NaN or inf values")
+
+
+
+def validate_model_info(info: dict) -> None:
+    """Phase 4b spec §6.2: model info is JSON-serialisable; fallback_rate in [0, 1]."""
+    try:
+        json.dumps(info)
+    except TypeError as exc:
+        raise ContractError(f"model_info: not JSON-serialisable ({exc})") from exc
+    if "fallback_rate" in info:
+        _check(0.0 <= info["fallback_rate"] <= 1.0, f"model_info: fallback_rate {info['fallback_rate']} outside [0, 1]")
 
 
 def validate_targets(targets: np.ndarray, conditions: pd.DataFrame, genes: pd.DataFrame) -> None:

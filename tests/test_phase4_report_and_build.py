@@ -7,6 +7,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+import pytest
 
 from phase4 import report, targets
 
@@ -55,3 +56,71 @@ def test_assemble_builds_a_consistent_eval_set(tmp_path):
     assert set(out["splits"]["condition_id"]) <= set(out["conditions"]["condition_id"])
     assert set(out["de_sets"]["condition_id"]) == set(out["conditions"]["condition_id"])
     assert list(out["genes"]["gene_symbol"]) == ["KRAS", "MYC", "TP53"]
+
+
+CFG = {"bootstrap": {"resamples": 200, "interval": 0.95, "seed": 1}}
+
+
+def _fake_run(root: Path, name: str, de_pearson: float, fallback: float | None):
+    _fake_results(root, name, de_pearson)
+    if fallback is not None:
+        res = json.loads((root / name / "results.json").read_text())
+        res["model_info"] = [{"repeat": r, "split": s, "fallback_rate": fallback} for r in range(5)
+                             for s in ["random", "unseen_drug", "unseen_cell_line", "both_unseen"]]
+        (root / name / "results.json").write_text(json.dumps(res))
+    rng = np.random.default_rng(0)
+    rows = [{"repeat": r, "split": s, "condition_id": f"c{i}", "de_pearson": de_pearson + 0.01 * rng.normal(), "disc_rank_global": 0.5}
+            for r in range(5) for s in ["random", "unseen_drug", "unseen_cell_line", "both_unseen"] for i in range(30)]
+    pd.DataFrame(rows).to_parquet(root / name / "per_condition.parquet")
+
+
+def test_report_coverage_and_paired(tmp_path):
+    _fake_run(tmp_path, "dummy", 0.0, None)
+    _fake_run(tmp_path, "drug_mean", 0.2, 0.25)
+    _fake_run(tmp_path, "ridge", 0.5, None)
+    md = report.render_results(tmp_path, CFG)
+    coverage = md.split("## Coverage")[1].split("\n## ")[0]
+    assert "| drug_mean | 25% | 25% | 25% | 25% |" in coverage and "dummy" not in coverage and "ridge" not in coverage
+    paired = md.split("## Paired vs ridge")[1]
+    row = next(line for line in paired.splitlines() if line.startswith("| drug_mean"))
+    estimates = [float(cell.split()[0]) for cell in row.strip("|").split("|")[1:]]
+    assert estimates == pytest.approx([-0.3] * 4, abs=0.01)  # de_pearson difference on every split
+    assert "n.d." in paired  # disc_rank_global differences are exactly 0
+
+
+def test_report_without_ridge(tmp_path):
+    _fake_run(tmp_path, "dummy", 0.0, None)
+    md = report.render_results(tmp_path, CFG)
+    assert "| dummy |" in md and "Paired vs ridge" not in md and "Coverage" not in md
+
+
+def test_report_shows_top1_secondary_and_detail(tmp_path):
+    _fake_run(tmp_path, "dummy", 0.0, None)
+    res = json.loads((tmp_path / "dummy" / "results.json").read_text())
+    for m in ["disc_top1_global", "disc_top1_within_line", "de_mse", "sign_accuracy", "all_gene_pearson"]:
+        res["summaries"][m] = res["summaries"]["de_pearson"]
+    (tmp_path / "dummy" / "results.json").write_text(json.dumps(res))
+    md = report.render_results(tmp_path, CFG)
+    for heading in ["## disc_top1_global", "## disc_top1_within_line", "## Secondary metrics", "### all_gene_pearson",
+                    "## de_pearson detail"]:
+        assert heading in md
+    detail = md.split("## de_pearson detail")[1]
+    assert "| dummy | random | [0.000, 1.000] | 10 | 0 | 0.000, 0.000, 0.000, 0.000, 0.000 |" in detail
+
+
+def test_run_eval_all_runs_each_model_in_its_own_process(monkeypatch, tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_eval.py"
+    spec_ = importlib.util.spec_from_file_location("run_eval", script)
+    run_eval = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(run_eval)
+    calls = []
+    monkeypatch.setattr(run_eval.subprocess, "run", lambda cmd, check: calls.append(cmd[cmd.index("--model") + 1]))
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "eval.yaml").write_text((script.parents[1] / "configs" / "eval.yaml").read_text())
+    monkeypatch.setattr(run_eval, "ROOT", tmp_path)
+    monkeypatch.setattr(run_eval, "REPORT", tmp_path / "results.md")
+    monkeypatch.setattr(run_eval, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["run_eval.py", "--all"])
+    run_eval.main()
+    assert calls == sorted(run_eval.PREDICTORS)
+    assert (tmp_path / "results.md").exists()

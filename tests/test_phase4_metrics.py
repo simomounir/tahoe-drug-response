@@ -72,3 +72,15 @@ def test_rows_align_with_conditions_order():
     out = metrics.score_conditions(TRUTH.copy(), TRUTH, GENES, DE, CONDS, CFG)
     assert list(out["condition_id"]) == ["a", "b", "c"]
     assert list(out["n_de_genes"]) == [3, 3, 3]
+
+
+def test_de_pearson_fast_path_matches_score_conditions():
+    rng = np.random.default_rng(3)
+    genes = [f"G{i}" for i in range(30)]
+    conds = pd.DataFrame({"condition_id": [f"c{i}" for i in range(6)], "cell_line": ["A", "A", "B", "B", "C", "C"]})
+    de = pd.DataFrame([{"condition_id": c, "gene_symbol": g, "rank": r + 1}
+                       for c in conds["condition_id"] for r, g in enumerate(rng.choice(genes, 8, replace=False))])
+    pred, truth = rng.normal(size=(6, 30)), rng.normal(size=(6, 30))
+    full = metrics.score_conditions(pred, truth, genes, de, conds, {"metrics": {"topk": [2]}})
+    idx = metrics.de_index(genes, de, set(conds["condition_id"]))
+    np.testing.assert_allclose(metrics.de_pearson(pred, truth, idx, list(conds["condition_id"])), full["de_pearson"])

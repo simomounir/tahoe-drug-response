@@ -14,7 +14,7 @@ import pandas as pd
 
 from phase1.build import peak_rss_mb
 from phase4 import contracts, uncertainty
-from phase4.metrics import score_conditions
+from phase4.metrics import de_index, de_pearson, score_conditions
 from phase4.predictors import PREDICTORS, TrainData
 
 NON_METRIC = {"repeat", "split", "condition_id", "n_de_genes"}
@@ -42,18 +42,31 @@ def evaluate(name: str, cfg: dict, eval_dir: Path, results_root: Path) -> Path:
     features = conditions.reset_index(drop=True)
 
     start = time.perf_counter()
-    scored = []
+    scored, model_info = [], []
     for (repeat, split), grp in splits.groupby(["repeat", "split"], sort=True):
         fit_rows = row_of[grp.loc[grp["part"] != "test", "condition_id"]].to_numpy()
         test_rows = row_of[grp.loc[grp["part"] == "test", "condition_id"]].to_numpy()
         part = grp.set_index("condition_id").loc[features.loc[fit_rows, "condition_id"], "part"].to_numpy()
-        model = PREDICTORS[name]()
-        model.fit(TrainData(features=features.iloc[fit_rows].reset_index(drop=True), targets=np.asarray(targets[fit_rows]), genes=genes, part=part))
+        val_rows = fit_rows[part == "val"]
+        val_ids = list(features.loc[val_rows, "condition_id"])
+        val_idx, val_truth = de_index(genes, data["de_sets"], set(val_ids)), np.asarray(targets[val_rows])
+
+        def val_score(pred_val: np.ndarray, val_ids=val_ids, val_idx=val_idx, val_truth=val_truth) -> float:
+            contracts.validate_prediction(pred_val, len(val_ids), len(genes))
+            return float(np.nanmedian(de_pearson(pred_val, val_truth, val_idx, val_ids)))
+
+        model = PREDICTORS[name](**cfg.get("models", {}).get(name, {}))
+        model.fit(TrainData(features=features.iloc[fit_rows].reset_index(drop=True), targets=np.asarray(targets[fit_rows]), genes=genes,
+                            part=part, val_score=val_score))
         test_features = features.iloc[test_rows].reset_index(drop=True)
         pred = model.predict(test_features)
         contracts.validate_prediction(pred, len(test_rows), len(genes))
         scores = score_conditions(pred, np.asarray(targets[test_rows]), genes, data["de_sets"], test_features[["condition_id", "cell_line"]], cfg)
         scored.append(scores.assign(repeat=repeat, split=split))
+        if hasattr(model, "info"):
+            info = model.info()
+            contracts.validate_model_info(info)
+            model_info.append({"repeat": int(repeat), "split": split, **info})
     runtime = time.perf_counter() - start
 
     per = pd.concat(scored, ignore_index=True)
@@ -63,7 +76,7 @@ def evaluate(name: str, cfg: dict, eval_dir: Path, results_root: Path) -> Path:
     metric_cols = [c for c in per.columns if c not in NON_METRIC]
     summaries = {m: uncertainty.summarize(per, m, cfg).to_dict(orient="records") for m in metric_cols}
     (out / "results.json").write_text(
-        json.dumps({"model": name, "runtime_s": round(runtime, 2), "peak_rss_mb": peak_rss_mb(), "summaries": summaries}, indent=1, default=float),
+        json.dumps({"model": name, "runtime_s": round(runtime, 2), "peak_rss_mb": peak_rss_mb(), "summaries": summaries, "model_info": model_info}, indent=1, default=float),
         encoding="utf-8",
     )
     return out

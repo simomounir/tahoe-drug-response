@@ -4,10 +4,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
+
+from phase4 import uncertainty
 from phase4.splits import SPLITS
 
-PRIMARY = ["de_pearson", "topk_overlap_50", "topk_overlap_100", "disc_rank_global", "disc_rank_within_line"]
+PRIMARY = ["de_pearson", "topk_overlap_50", "topk_overlap_100", "disc_rank_global", "disc_top1_global",
+           "disc_rank_within_line", "disc_top1_within_line"]
+SECONDARY = ["all_gene_pearson", "de_mse", "sign_accuracy"]  # evaluation.md §5.3
 LOWER_IS_BETTER = {"disc_rank_global", "disc_rank_within_line", "de_mse"}
+PAIRED = ["de_pearson", "disc_rank_global"]
+REFERENCE = "ridge"  # the bar every other model is compared against (evaluation.md §6)
 
 
 def _cell(row: dict | None) -> str:
@@ -16,7 +23,8 @@ def _cell(row: dict | None) -> str:
     return f"{row['estimate']:.3f} [{row['ci_low']:.3f}, {row['ci_high']:.3f}]"
 
 
-def render_results(results_dir: Path) -> str:
+def render_results(results_dir: Path, cfg: dict | None = None) -> str:
+    """Per-metric tables; coverage for models that report fallbacks; paired differences vs ridge when `cfg` is given."""
     results = [json.loads(p.read_text()) for p in sorted(Path(results_dir).glob("*/results.json"))]
     metrics = [m for m in PRIMARY if any(m in r["summaries"] for r in results)] or sorted({m for r in results for m in r["summaries"]})
     lines = [
@@ -28,12 +36,74 @@ def render_results(results_dir: Path) -> str:
         "",
     ]
     for metric in metrics:
-        lines += [f"## {metric}" + (" (lower is better)" if metric in LOWER_IS_BETTER else ""), ""]
-        lines += ["| model | " + " | ".join(SPLITS) + " |", "|---|" + "---|" * len(SPLITS)]
-        for r in results:
-            by_split = {row["split"]: row for row in r["summaries"].get(metric, [])}
-            lines.append(f"| {r['model']} | " + " | ".join(_cell(by_split.get(s)) for s in SPLITS) + " |")
-        lines.append("")
+        lines += _metric_table(results, metric, "##")
+    secondary = [m for m in SECONDARY if any(m in r["summaries"] for r in results)]
+    if secondary:
+        lines += ["## Secondary metrics", ""]
+        for metric in secondary:
+            lines += _metric_table(results, metric, "###")
+    lines += _detail(results, "de_pearson")
+    lines += _coverage(results)
+    if cfg is not None:
+        lines += _paired_vs_reference(Path(results_dir), [r["model"] for r in results], cfg)
     lines += ["## Runs", "", "| model | runtime (s) | peak RSS (MB) |", "|---|---|---|"]
     lines += [f"| {r['model']} | {r['runtime_s']} | {r['peak_rss_mb']} |" for r in results]
     return "\n".join(lines) + "\n"
+
+
+def _metric_table(results: list[dict], metric: str, level: str) -> list[str]:
+    lines = [f"{level} {metric}" + (" (lower is better)" if metric in LOWER_IS_BETTER else ""), ""]
+    lines += ["| model | " + " | ".join(SPLITS) + " |", "|---|" + "---|" * len(SPLITS)]
+    for r in results:
+        by_split = {row["split"]: row for row in r["summaries"].get(metric, [])}
+        lines.append(f"| {r['model']} | " + " | ".join(_cell(by_split.get(s)) for s in SPLITS) + " |")
+    return lines + [""]
+
+
+def _detail(results: list[dict], metric: str) -> list[str]:
+    """Spread and repeat stability of the headline metric (evaluation.md §5.4): IQR of per-condition scores, counts, repeat medians."""
+    rows = []
+    for r in results:
+        for row in r["summaries"].get(metric, []):
+            if row.get("repeat_medians"):
+                medians = ", ".join(f"{v:.3f}" for v in row["repeat_medians"])
+                rows.append(f"| {r['model']} | {row['split']} | [{row['iqr_low']:.3f}, {row['iqr_high']:.3f}] | {row['n_scored']} | {row['n_nan']} | {medians} |")
+    if not rows:
+        return []
+    return [f"## {metric} detail", "", "Condition exclusions are counted in `reports/eval_data.md`.", "",
+            "| model | split | IQR | scored | NaN | median per repeat |", "|---|---|---|---|---|---|", *rows, ""]
+
+
+def _coverage(results: list[dict]) -> list[str]:
+    """Mean fallback rate per model x split, for models that report one (phase 4b spec B2)."""
+    rows = []
+    for r in results:
+        info = pd.DataFrame(r.get("model_info", []))
+        if "fallback_rate" not in info:
+            continue
+        rate = info.groupby("split")["fallback_rate"].mean()
+        rows.append(f"| {r['model']} | " + " | ".join(f"{rate[s]:.0%}" if s in rate else "—" for s in SPLITS) + " |")
+    if not rows:
+        return []
+    return ["## Coverage (fallback rate)", "", "Share of test conditions where the baseline had nothing to look up and fell back one level.", "",
+            "| model | " + " | ".join(SPLITS) + " |", "|---|" + "---|" * len(SPLITS), *rows, ""]
+
+
+def _paired_vs_reference(results_dir: Path, models: list[str], cfg: dict) -> list[str]:
+    """Model minus ridge per condition, bootstrapped within repeats (evaluation.md §7); n.d. = interval contains 0."""
+    ref_path = results_dir / REFERENCE / "per_condition.parquet"
+    others = [m for m in models if m != REFERENCE and (results_dir / m / "per_condition.parquet").exists()]
+    if not ref_path.exists() or not others:
+        return []
+    ref = pd.read_parquet(ref_path)
+    lines = ["## Paired vs ridge", "", "Model − ridge on the same conditions; n.d. = no detectable difference (interval contains 0).", ""]
+    for metric in PAIRED:
+        lines += [f"### {metric}" + (" (lower is better)" if metric in LOWER_IS_BETTER else ""), ""]
+        lines += ["| model | " + " | ".join(SPLITS) + " |", "|---|" + "---|" * len(SPLITS)]
+        for m in others:
+            diff = uncertainty.paired(pd.read_parquet(results_dir / m / "per_condition.parquet"), ref, metric, cfg).set_index("split")
+            cells = [_cell(diff.loc[s].to_dict()) + (" n.d." if diff.loc[s, "no_detectable_difference"] else "") if s in diff.index else "—"
+                     for s in SPLITS]
+            lines.append(f"| {m} | " + " | ".join(cells) + " |")
+        lines.append("")
+    return lines
