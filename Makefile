@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features
+.PHONY: test phase1 phase1-dry-run features eval-data eval results
 
 test:
 	python -m pytest -q
@@ -31,3 +31,15 @@ data/pseudobulk/conditions.parquet:
 features: data/pseudobulk/conditions.parquet data/cache/hf/metadata/drug_metadata.parquet \
           data/cache/cell_line_metadata.parquet data/cache/depmap/OmicsExpressionProteinCodingGenesTPMLogp1.parquet
 	python scripts/build_features.py
+
+# Phase 4a evaluation harness (docs/superpowers/specs/2026-09-27-phase4a-harness-design.md).
+# eval-data streams Tahoe's DESeq2 rows once (~22 GB, one subprocess per line, resumable).
+eval-data: features
+	python scripts/build_eval_data.py
+
+MODEL ?= dummy
+eval:
+	python scripts/run_eval.py --model $(MODEL)
+
+results:
+	python scripts/run_eval.py --report
