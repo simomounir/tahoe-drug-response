@@ -285,6 +285,18 @@ All amendments below were made on **2026-09-26, before any model, baseline or sp
   Tahoe-100M results use the full atlas (50 lines × 379 compounds, other splits) and are not
   comparable to this 92-compound slice.
 
+Amendments made **after** results existed:
+
+- **A8 — §6 baseline 5 (2026-09-27, post-hoc, owner decision).** *Before:* "Ridge regression from
+  [chemistry features ⊕ cell line features] to the logFC vector." *Now:* ridge fits the residual from
+  the per-dose mean of its fitting rows and adds that mean back, so full shrinkage gives exactly
+  `global_mean`; `Ipc` enters as `log1p(Ipc)` (made before any ridge result was read). *Why:* on the
+  first full run ridge scored 0.597 vs `global_mean` 0.666 (`de_pearson`, `both_unseen`), with α at
+  the grid maximum in 3/5 repeats: an isotropic penalty shrinks the dose term along with ~2,340
+  features, so full shrinkage gave the all-dose mean. The change makes the reference model stronger,
+  so it cannot favour the neural model in §8. *Result after:* ridge 0.666 on `both_unseen`, no
+  detectable difference from `global_mean`. Details: phase 4b spec amendments B7, B8.
+
 ## 13. Open questions
 
 - ~~Which DE test is appropriate for pseudobulk profiles with varying cell counts per
