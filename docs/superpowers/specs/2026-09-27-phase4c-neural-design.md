@@ -33,7 +33,7 @@ scoring set.
 | N2 | **Residual on the per-dose mean**, as ridge after B8 | Same floor as ridge: a network that learns nothing predicts `global_mean` | None |
 | N3 | Architecture: input → 512 → 512 → n_genes, ReLU, dropout after each hidden layer, linear output | Standard; width matters less than regularisation with ~74 training drugs | Under- or over-capacity |
 | N4 | Loss MSE over all genes; AdamW, lr 1e-3, batch 256, ≤ 50 epochs, early stopping on val median `de_pearson` with patience 5 | Val metric = the headline metric, as ridge's α (B5) | Other losses might favour DE genes more |
-| N5 | **Search per fit** over 4 configs: dropout {0.2, 0.5} × weight decay {1e-4, 1e-2}; best val `de_pearson` wins (ties → stronger regularisation); refit on train + val for the chosen config's best epoch count | Repeats redraw splits, so one repeat's val can be another's test: tuning once per split and reusing it would let test data steer selection (§2.3). Per fit mirrors ridge's per-fit α. 4 configs vs ridge's 17 α values is comparable effort for the §11 parity rule | A wider search could find a better config; budget-limited (owner: ≤ 1 h) |
+| N5 | **Search per fit** over 4 configs: dropout {0.2, 0.5} × weight decay {1e-4, 1e-2}; best val `de_pearson` wins (ties → larger weight decay, then larger dropout); refit on train + val for the chosen config's best epoch count | Repeats redraw splits, so one repeat's val can be another's test: tuning once per split and reusing it would let test data steer selection (§2.3). Per fit mirrors ridge's per-fit α. 4 configs vs ridge's 17 α values is comparable effort for the §11 parity rule | A wider search could find a better config; budget-limited (owner: ≤ 1 h) |
 | N6 | Ablation = same class with `use_cell_features: false`: drops `pc_*`, `dmg_*`, `hot_*`, `drv_*`; registered as `neural_nocell` and `ridge_nocell` | Answers §8's secondary question for both model families in one table (owner decision) | +~1 h compute |
 | N7 | PyTorch, trained on the M1 GPU (MPS) when available, else CPU; the device is recorded in `results.json` | Fits the 1 h budget; CPU alone is ~5× slower | MPS is not bit-reproducible (N8) |
 | N8 | Seeds from config (`torch.manual_seed`, numpy); MPS runs may differ in the last digits between runs, stated in the report; CPU runs are bit-identical and are what the tests check | `evaluation.md` §9 asks for reproducibility; the GPU cannot fully guarantee it | Last-digit differences on rerun |
@@ -78,7 +78,7 @@ Offline, tiny synthetic data, CPU:
 - The MLP fits a pure interaction (y = drug feature × cell feature) that ridge cannot (MLP val Pearson clearly
   above ridge's).
 - With its output layer zeroed, the predictor returns exactly the per-dose mean.
-- The search picks the config with the best val score (stubbed `val_score`), ties go to stronger regularisation,
+- The search picks the config with the best val score (stubbed `val_score`), ties go to larger weight decay then larger dropout,
   and the refit trains for the recorded epoch count.
 - `use_cell_features=False` drops the cell columns (both `neural` and `ridge`).
 - Two seeded CPU fits give identical predictions.
