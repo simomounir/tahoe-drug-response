@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results
+.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study
 
 test:
 	python -m pytest -q
@@ -47,3 +47,7 @@ eval-all:
 
 results:
 	python scripts/run_eval.py --report
+
+# Phase 5a case study page (docs/superpowers/specs/2026-09-28-phase5a-case-study-design.md); needs make eval-all results.
+case-study:
+	python scripts/build_case_study.py

@@ -137,3 +137,18 @@ def test_harness_passes_model_kwargs_from_config(tmp_path, monkeypatch):
 def test_model_info_contract(info, match):
     with pytest.raises(ContractError, match=match):
         contracts.validate_model_info(info)
+
+
+def test_fit_inputs_matches_split_file(tmp_path):
+    d = _write_eval_dir(tmp_path)
+    data = harness.load_eval_dir(d)
+    grp = data["splits"][(data["splits"]["repeat"] == 1) & (data["splits"]["split"] == "unseen_drug")]
+    train, test_rows = harness.fit_inputs(data, 1, "unseen_drug")
+    ids = data["conditions"]["condition_id"]
+    assert set(train.features["condition_id"]) == set(grp.loc[grp["part"] != "test", "condition_id"])
+    assert set(ids.iloc[test_rows]) == set(grp.loc[grp["part"] == "test", "condition_id"])
+    part_of = dict(zip(grp["condition_id"], grp["part"]))
+    assert list(train.part) == [part_of[c] for c in train.features["condition_id"]]
+    row_of = {c: i for i, c in enumerate(ids)}
+    np.testing.assert_array_equal(train.targets, np.asarray(data["targets"])[[row_of[c] for c in train.features["condition_id"]]])
+    assert train.val_score(np.asarray(train.targets[train.part == "val"])) == pytest.approx(1.0)

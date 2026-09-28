@@ -33,31 +33,41 @@ def load_eval_dir(eval_dir: Path) -> dict:
     return data
 
 
+def fit_inputs(data: dict, repeat: int, split: str) -> tuple[TrainData, np.ndarray]:
+    """What one fit sees: TrainData for the train + val rows of (repeat, split), with the val scorer, and the test row indices."""
+    conditions, targets, splits = data["conditions"], data["targets"], data["splits"]
+    genes = list(data["genes"]["gene_symbol"])
+    features = conditions.reset_index(drop=True)
+    row_of = pd.Series(np.arange(len(conditions)), index=conditions["condition_id"])
+    grp = splits[(splits["repeat"] == repeat) & (splits["split"] == split)]
+    fit_rows = row_of[grp.loc[grp["part"] != "test", "condition_id"]].to_numpy()
+    test_rows = row_of[grp.loc[grp["part"] == "test", "condition_id"]].to_numpy()
+    part = grp.set_index("condition_id").loc[features.loc[fit_rows, "condition_id"], "part"].to_numpy()
+    val_rows = fit_rows[part == "val"]
+    val_ids = list(features.loc[val_rows, "condition_id"])
+    val_idx, val_truth = de_index(genes, data["de_sets"], set(val_ids)), np.asarray(targets[val_rows])
+
+    def val_score(pred_val: np.ndarray) -> float:
+        contracts.validate_prediction(pred_val, len(val_ids), len(genes))
+        return float(np.nanmedian(de_pearson(pred_val, val_truth, val_idx, val_ids)))
+
+    train = TrainData(features=features.iloc[fit_rows].reset_index(drop=True), targets=np.asarray(targets[fit_rows]), genes=genes,
+                      part=part, val_score=val_score)
+    return train, test_rows
+
+
 def evaluate(name: str, cfg: dict, eval_dir: Path, results_root: Path) -> Path:
     """Score predictor `name` on all repeats x splits; returns the results directory."""
     data = load_eval_dir(eval_dir)
-    conditions, targets, splits = data["conditions"], data["targets"], data["splits"]
-    genes = list(data["genes"]["gene_symbol"])
-    row_of = pd.Series(np.arange(len(conditions)), index=conditions["condition_id"])
-    features = conditions.reset_index(drop=True)
+    targets, genes = data["targets"], list(data["genes"]["gene_symbol"])
+    features = data["conditions"].reset_index(drop=True)
 
     start = time.perf_counter()
     scored, model_info = [], []
-    for (repeat, split), grp in splits.groupby(["repeat", "split"], sort=True):
-        fit_rows = row_of[grp.loc[grp["part"] != "test", "condition_id"]].to_numpy()
-        test_rows = row_of[grp.loc[grp["part"] == "test", "condition_id"]].to_numpy()
-        part = grp.set_index("condition_id").loc[features.loc[fit_rows, "condition_id"], "part"].to_numpy()
-        val_rows = fit_rows[part == "val"]
-        val_ids = list(features.loc[val_rows, "condition_id"])
-        val_idx, val_truth = de_index(genes, data["de_sets"], set(val_ids)), np.asarray(targets[val_rows])
-
-        def val_score(pred_val: np.ndarray, val_ids=val_ids, val_idx=val_idx, val_truth=val_truth) -> float:
-            contracts.validate_prediction(pred_val, len(val_ids), len(genes))
-            return float(np.nanmedian(de_pearson(pred_val, val_truth, val_idx, val_ids)))
-
+    for repeat, split in sorted(set(zip(data["splits"]["repeat"], data["splits"]["split"]))):
+        train, test_rows = fit_inputs(data, repeat, split)
         model = PREDICTORS[name](**cfg.get("models", {}).get(name, {}))
-        model.fit(TrainData(features=features.iloc[fit_rows].reset_index(drop=True), targets=np.asarray(targets[fit_rows]), genes=genes,
-                            part=part, val_score=val_score))
+        model.fit(train)
         test_features = features.iloc[test_rows].reset_index(drop=True)
         pred = model.predict(test_features)
         contracts.validate_prediction(pred, len(test_rows), len(genes))

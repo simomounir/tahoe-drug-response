@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drug Response Case Study</title>
+<meta name="description" content="Can a model predict how a new drug changes gene expression in a new cancer cell line? A pre-registered test on Tahoe-100M.">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fcfcfb; --surface: #f3f2ee; --text: #0b0b0b; --text-2: #52514e; --muted: #6f6e69;
+  --line: #e1e0d9; --grid: #e1e0d9; --accent: #2a78d6;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --fail-bg: #fbe9e7; --fail-text: #9b2c1f; --ok-bg: #e6f4ea; --ok-text: #1e6b35;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a19; --surface: #232322; --text: #ffffff; --text-2: #c3c2b7; --muted: #9a998f;
+    --line: #2c2c2a; --grid: #2c2c2a; --accent: #3987e5;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+    --fail-bg: #3a1f1c; --fail-text: #ffb4a8; --ok-bg: #173222; --ok-text: #9fdcb0;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a19; --surface: #232322; --text: #ffffff; --text-2: #c3c2b7; --muted: #9a998f;
+  --line: #2c2c2a; --grid: #2c2c2a; --accent: #3987e5;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  --fail-bg: #3a1f1c; --fail-text: #ffb4a8; --ok-bg: #173222; --ok-text: #9fdcb0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; margin: 8px 0 16px; letter-spacing: -0.01em; }
+h2 { font-size: 24px; margin: 56px 0 12px; }
+h3 { font-size: 18px; margin: 32px 0 8px; }
+p, li { color: var(--text-2); }
+strong { color: var(--text); }
+.eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+.lede { font-size: 19px; color: var(--text-2); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin: 24px 0; }
+.badge { display: inline-block; font-weight: 700; font-size: 14px; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; }
+.badge.failure { background: var(--fail-bg); color: var(--fail-text); }
+.badge.success { background: var(--ok-bg); color: var(--ok-text); }
+.claim { font-size: 15px; color: var(--muted); margin: 8px 0 16px; }
+.numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.num { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.num .v { font-size: clamp(24px, 6vw, 32px); font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.num .k { font-size: 13px; color: var(--muted); }
+.sentence { margin: 4px 0; color: var(--text); }
+figure { margin: 24px 0; }
+figure svg { display: block; width: 100%; height: auto; color: var(--text-2); }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+details { margin: 8px 0 0; font-size: 14px; }
+summary { cursor: pointer; color: var(--accent); }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--muted); font-weight: 600; }
+tbody th { font-weight: 500; color: var(--text); }
+.ci { display: block; color: var(--muted); font-size: 12px; }
+blockquote { margin: 12px 0; padding: 8px 16px; border-left: 3px solid var(--accent); color: var(--text-2); font-size: 15px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+pre { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.note { font-size: 14px; color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--line); margin: 56px 0 0; }
+@media (max-width: 520px) { .numbers { grid-template-columns: 1fr; } body { font-size: 16px; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="eyebrow">Case study · drug response on Tahoe-100M</p>
+  <h1>Can a model predict how a new drug changes gene expression in a new cancer cell line?</h1>
+  <p class="lede">A neural network, ridge regression and a trivial baseline were compared under rules written before any model existed.</p>
+</header>
+
+<section class="card" aria-labelledby="verdict">
+  <p class="eyebrow" id="verdict">Pre-registered claim · verdict</p>
+  <p><span class="badge $verdict_class">$verdict</span></p>
+  <p class="claim">$claim_rule</p>
+  <div class="numbers" role="list">
+    <div class="num" role="listitem"><div class="v">$headline_neural</div><div class="k">neural network</div></div>
+    <div class="num" role="listitem"><div class="v">$headline_ridge</div><div class="k">ridge regression</div></div>
+    <div class="num" role="listitem"><div class="v">$headline_mean</div><div class="k">average response at that dose</div></div>
+  </div>
+  <p class="note">Median Pearson correlation between predicted and measured expression change over each condition's differentially expressed genes, for a new drug in a new cell line.</p>
+  <p class="sentence">On new drugs in new cell lines: $sentence_neural_ridge on DE-gene Pearson; on discrimination (lower rank is better), $sentence_disc.</p>
+  <p class="sentence">And $sentence_ridge_mean.</p>
+  <div class="table-wrap"><table><thead><tr><th scope="col">neural − ridge, new drug + new line</th><th scope="col">difference [95% interval]</th></tr></thead>
+  <tbody><tr><th scope="row">DE-gene Pearson (higher is better)</th><td>$claim_de</td></tr>
+  <tr><th scope="row">discrimination rank (lower is better)</th><td>$claim_disc</td></tr></tbody></table></div>
+</section>
+
+<section aria-labelledby="trust">
+  <h2 id="trust">Why the result can be trusted</h2>
+  <ul>
+    <li><strong>Rules first.</strong> Splits, metrics and the success criterion were written down before any model was trained; the $n_amendments later changes are logged with their reasons.</li>
+    <li><strong>Baselines first.</strong> Five simple baselines were scored before the neural network, and ridge regression got the same inputs and a comparable tuning budget.</li>
+    <li><strong>Uncertainty everywhere.</strong> Every split is drawn $n_repeats times; intervals come from $n_resamples bootstrap resamples within each repeat, and model comparisons are paired on the same conditions.</li>
+  </ul>
+</section>
+
+<figure>
+  $degradation_svg
+  <figcaption>Median DE-gene Pearson with 95% intervals, with splits ordered from least to most held out (random to new drug and new cell line). Hover a point for its value.</figcaption>
+  <details><summary>Show the numbers</summary>$degradation_table</details>
+</figure>
+
+<hr>
+
+<section aria-labelledby="data">
+  <h2 id="data">Data</h2>
+  <p>Tahoe-100M single-cell profiles, aggregated per condition (cell line × drug × dose × plate) and compared with the DMSO control of the same line on the same plate. The evaluation set has <strong>$n_conditions conditions</strong>: $n_drugs drugs at $n_doses doses in $n_lines cell lines, each a log fold-change vector over $n_genes protein-coding genes. Differentially expressed genes come from Tahoe's DESeq2 table (median $median_de_genes per condition).</p>
+  <p>Inputs: drug structure (Morgan fingerprint, RDKit descriptors) and cell-line context from DepMap (expression principal components fitted on about 1,700 external lines, mutation flags). No input is derived from the measured response.</p>
+</section>
+
+<section aria-labelledby="design">
+  <h2 id="design">Evaluation design</h2>
+  <p>Four splits hold out progressively more: random conditions, whole cell lines, whole drugs (with near-duplicate molecules kept together), and new drug plus new cell line at once. Validation data comes from the training side of each split; test data is scored once per model.</p>
+  <p>The headline metric is the Pearson correlation over each condition's differentially expressed genes; discrimination (can the prediction pick out its own condition among all test conditions) guards against models that predict one generic response. The pre-registered rule:</p>
+  <blockquote>$claim_rule</blockquote>
+  <h3>All models (median DE-gene Pearson, 95% interval)</h3>
+  $results_table
+  <h3>Do cell-line features help?</h3>
+  <p>Paired difference between each model and the same model without cell-line features.</p>
+  $ablation_table
+</section>
+
+<section aria-labelledby="failure">
+  <h2 id="failure">A failure case, inspected</h2>
+  <p><strong>Selection rule, fixed before looking at any model's score:</strong> among the test conditions of the first "new drug + new line" split, the one whose measured response is farthest from the average response at its dose.</p>
+  <p>Selected: <strong>$fc_drug</strong> at $fc_dose in <strong>$fc_line</strong>. The $fc_n_genes most strongly changed DE genes:</p>
+  <figure>
+    $fc_svg
+    <figcaption>Measured log fold-change (dark dots) against each model's prediction. Predictions come from refitting each model on exactly the training data of that split with the same settings; the Pearson values in the text are from the scored run. Hover a marker for its value.</figcaption>
+    <details><summary>Show the numbers</summary>$fc_table</details>
+  </figure>
+  <p>$fc_explanation</p>
+</section>
+
+<section aria-labelledby="limits">
+  <h2 id="limits">Amendments and limitations</h2>
+  <p>Changes to the evaluation rules, each logged with the old rule and the reason:</p>
+  $amendments_html
+  <p>What this does not show: the slice covers $n_drugs drugs from Tahoe plates 1–3, one dataset and one cell-level aggregation (pseudobulk). With so few distinct drugs a model has little chemistry to generalise from; a larger or more diverse compound set could change the answer.</p>
+</section>
+
+<section aria-labelledby="repro">
+  <h2 id="repro">Reproduce</h2>
+<pre><code>make phase1        # Tahoe-100M → pseudobulk and logFC
+make features      # drug and cell-line features
+make eval-data     # DE sets, targets, splits
+make eval-all      # every model, all splits and repeats
+make case-study    # this page</code></pre>
+  $runs_table
+  $mps_note
+</section>
+</main>
+</body>
+</html>
