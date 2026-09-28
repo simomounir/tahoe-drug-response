@@ -296,6 +296,11 @@ Amendments made **after** results existed:
   features, so full shrinkage gave the all-dose mean. The change makes the reference model stronger,
   so it cannot favour the neural model in §8. *Result after:* ridge 0.666 on `both_unseen`, no
   detectable difference from `global_mean`. Details: phase 4b spec amendments B7, B8.
+- **A9 — §6 baseline 5 tuning range (2026-09-27, post-hoc, before any neural test result).** *Before:* α grid
+  10^-2 … 10^6 (17 values). *Now:* 10^-4 … 10^6 (21 values). *Why:* ridge chose the grid minimum in all
+  5 `random` repeats, so the grid edge, not the data, set its regularisation. Strengthens the reference
+  only. The neural model's epoch cap was likewise raised (50 → 200, early stopping decides) after a
+  train/val-only probe showed it still improving at 50 (phase 4c spec N9).
 
 ## 13. Open questions
 

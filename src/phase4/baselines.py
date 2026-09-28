@@ -123,10 +123,13 @@ class NearestChemical:
         return {"fallback_rate": self.fallback_rate}
 
 
-def scalar_columns(features: pd.DataFrame) -> list[str]:
-    """Ridge's non-fingerprint inputs: RDKit descriptors, dose, expression PCs, mutation and driver flags."""
+CELL_PREFIXES = ("pc_", "dmg_", "hot_", "drv_")  # expression PCs, damaging / hotspot mutation flags, Tahoe driver flags
+
+
+def scalar_columns(features: pd.DataFrame, use_cell_features: bool = True) -> list[str]:
+    """Non-fingerprint inputs: RDKit descriptors, dose, and (unless ablated, phase 4c N6) the cell-line features."""
     desc = [c for c in DESCRIPTOR_NAMES if c in features.columns]
-    cells = [c for c in features.columns if c.startswith(("pc_", "dmg_", "hot_", "drv_"))]
+    cells = [c for c in features.columns if c.startswith(CELL_PREFIXES)] if use_cell_features else []
     return [*desc, DOSE, *cells]
 
 
@@ -144,6 +147,18 @@ def design_matrix(features: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return np.hstack([fp, scalars])
 
 
+class Standardizer:
+    """Mean/SD of the rows it is built on; columns with zero SD there are dropped (they carry nothing to fit)."""
+
+    def __init__(self, x: np.ndarray):
+        mu, sd = x.mean(axis=0), x.std(axis=0)
+        self.keep = sd > 1e-12
+        self.mu, self.sd = mu[self.keep], sd[self.keep]
+
+    def transform(self, x: np.ndarray) -> np.ndarray:
+        return (x[:, self.keep] - self.mu) / self.sd
+
+
 class _RidgePath:
     """Every ridge solution from one SVD of the standardised X (spec B4); zero-SD columns are dropped.
 
@@ -151,16 +166,14 @@ class _RidgePath:
     """
 
     def __init__(self, x: np.ndarray, y: np.ndarray):
-        mu, sd = x.mean(axis=0), x.std(axis=0)
-        self.keep = sd > 1e-12
-        self.mu, self.sd = mu[self.keep], sd[self.keep]
-        u, self.s, vt = np.linalg.svd((x[:, self.keep] - self.mu) / self.sd, full_matrices=False)
+        self.std = Standardizer(x)
+        u, self.s, vt = np.linalg.svd(self.std.transform(x), full_matrices=False)
         self.v = vt.T
         self.y_mean = y.mean(axis=0, dtype=np.float64).astype(np.float32)
         self.uty = u.T.astype(np.float32) @ y
 
     def predict(self, x: np.ndarray, alpha: float) -> np.ndarray:
-        a = (((x[:, self.keep] - self.mu) / self.sd) @ self.v) * (self.s / (self.s ** 2 + alpha))
+        a = (self.std.transform(x) @ self.v) * (self.s / (self.s ** 2 + alpha))
         return a.astype(np.float32) @ self.uty + self.y_mean
 
 
@@ -177,14 +190,15 @@ class RidgeBaseline:
     de_pearson (ties to the larger α), then refit on train + val (B5).
     """
 
-    def __init__(self, alpha_log10_start: float, alpha_log10_stop: float, alpha_log10_step: float):
+    def __init__(self, alpha_log10_start: float, alpha_log10_stop: float, alpha_log10_step: float, use_cell_features: bool = True):
+        self.use_cell_features = use_cell_features
         self.alphas = 10.0 ** np.arange(alpha_log10_start, alpha_log10_stop + alpha_log10_step / 2, alpha_log10_step)
 
     def fit(self, train: TrainData) -> None:
         is_val = np.asarray(train.part) == "val"
         if train.val_score is None or not is_val.any() or is_val.all():
             raise ValueError("ridge needs train and val rows and TrainData.val_score to choose alpha")
-        self.cols = scalar_columns(train.features)
+        self.cols = scalar_columns(train.features, self.use_cell_features)
         x = design_matrix(train.features, self.cols)
         y = np.asarray(train.targets, dtype=np.float32)
         fit_rows, val_rows = train.features[~is_val].reset_index(drop=True), train.features[is_val].reset_index(drop=True)

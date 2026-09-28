@@ -199,3 +199,27 @@ def test_ridge_with_infinite_alpha_is_the_per_dose_mean():
     gm = baselines.GlobalMean()
     gm.fit(TrainData(features=f[fit].reset_index(drop=True), targets=y[fit], genes=[f"G{i}" for i in range(40)], part=part[fit]))
     np.testing.assert_allclose(model.predict(test), gm.predict(test), atol=1e-3)
+
+
+def test_scalar_columns_without_cell_features():
+    f, _ = _frame()
+    cols = baselines.scalar_columns(f, use_cell_features=False)
+    assert not [c for c in cols if c.startswith(baselines.CELL_PREFIXES)]
+    assert "MolWt" in cols and baselines.DOSE in cols
+    assert "pc_1" in baselines.scalar_columns(f)
+
+
+def test_ridge_nocell_ignores_cell_features():
+    f, y, part = _ridge_data(noise=1.0)
+    g = f.copy()
+    g["pc_1"], g["dmg_TP53"] = g["pc_1"] + 3.0, 1.0 - g["dmg_TP53"]
+    fit = part != "test"
+    preds = []
+    for frame in (f, g):
+        model = baselines.RidgeBaseline(**RIDGE_KW, use_cell_features=False)
+        val_truth = y[part == "val"]
+        model.fit(TrainData(features=frame[fit].reset_index(drop=True), targets=y[fit], genes=[f"G{i}" for i in range(40)], part=part[fit],
+                            val_score=lambda p: float(np.median(_row_pearson(p, val_truth)))))
+        preds.append(model.predict(frame[part == "test"].reset_index(drop=True)))
+    np.testing.assert_array_equal(preds[0], preds[1])
+    assert PREDICTORS["ridge_nocell"] is baselines.RidgeBaseline

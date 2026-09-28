@@ -15,6 +15,10 @@ SECONDARY = ["all_gene_pearson", "de_mse", "sign_accuracy"]  # evaluation.md §5
 LOWER_IS_BETTER = {"disc_rank_global", "disc_rank_within_line", "de_mse"}
 PAIRED = ["de_pearson", "disc_rank_global"]
 REFERENCE = "ridge"  # the bar every other model is compared against (evaluation.md §6)
+CLAIM_RULE = ("Success: the paired bootstrap interval on the difference in de_pearson (neural − ridge, both_unseen, test) excludes "
+              "zero in favour of the neural model, and discrimination shows the same direction. Failure: the interval contains zero, "
+              "or favours ridge.")
+ABLATIONS = [("neural", "neural_nocell"), ("ridge", "ridge_nocell")]  # full model, same model without cell features (phase 4c N6)
 
 
 def _cell(row: dict | None) -> str:
@@ -35,6 +39,8 @@ def render_results(results_dir: Path, cfg: dict | None = None) -> str:
         "(evaluation.md §7). Discrimination ranks: lower is better (0 = best, 0.5 = chance).",
         "",
     ]
+    if cfg is not None:
+        lines += _claim(Path(results_dir), cfg, results)
     for metric in metrics:
         lines += _metric_table(results, metric, "##")
     secondary = [m for m in SECONDARY if any(m in r["summaries"] for r in results)]
@@ -107,3 +113,38 @@ def _paired_vs_reference(results_dir: Path, models: list[str], cfg: dict) -> lis
             lines.append(f"| {m} | " + " | ".join(cells) + " |")
         lines.append("")
     return lines
+
+
+def claim_verdict(de_row: dict, disc_row: dict) -> str:
+    """evaluation.md §8, mechanically: de_pearson interval entirely above 0 and discrimination rank lower (better) for neural."""
+    return "SUCCESS" if de_row["ci_low"] > 0 and disc_row["estimate"] < 0 else "FAILURE"
+
+
+def _claim(results_dir: Path, cfg: dict, results: list[dict]) -> list[str]:
+    def per(model: str) -> pd.DataFrame | None:
+        path = results_dir / model / "per_condition.parquet"
+        return pd.read_parquet(path) if path.exists() else None
+
+    neural, ridge = per("neural"), per(REFERENCE)
+    if neural is None or ridge is None:
+        return []
+    de = uncertainty.paired(neural, ridge, "de_pearson", cfg).set_index("split").loc["both_unseen"].to_dict()
+    disc = uncertainty.paired(neural, ridge, "disc_rank_global", cfg).set_index("split").loc["both_unseen"].to_dict()
+    lines = ["## Pre-registered claim (evaluation.md §8)", "", f"> {CLAIM_RULE}", "", f"Verdict: **{claim_verdict(de, disc)}**", "",
+             "| both_unseen: neural − ridge | difference [95% interval] |", "|---|---|",
+             f"| de_pearson | {_cell(de)} |", f"| disc_rank_global (lower is better) | {_cell(disc)} |", ""]
+    mps = sorted({r["model"] for r in results for i in r.get("model_info", []) if i.get("device") == "mps"})
+    if mps:
+        lines += [f"{', '.join(mps)} trained on MPS (Apple GPU), which is not bit-reproducible: a rerun may differ in the last digits. "
+                  "CPU runs are bit-identical (phase 4c N8).", ""]
+    lines += ["### Ablation: full model − same model without cell features (de_pearson)", "",
+              "| model | " + " | ".join(SPLITS) + " |", "|---|" + "---|" * len(SPLITS)]
+    for full, nocell in ABLATIONS:
+        a, b = per(full), per(nocell)
+        if a is None or b is None:
+            cells = ["—"] * len(SPLITS)
+        else:
+            diff = uncertainty.paired(a, b, "de_pearson", cfg).set_index("split")
+            cells = [_cell(diff.loc[s].to_dict()) if s in diff.index else "—" for s in SPLITS]
+        lines.append(f"| {full} | " + " | ".join(cells) + " |")
+    return lines + [""]

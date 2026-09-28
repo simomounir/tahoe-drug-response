@@ -124,3 +124,58 @@ def test_run_eval_all_runs_each_model_in_its_own_process(monkeypatch, tmp_path):
     run_eval.main()
     assert calls == sorted(run_eval.PREDICTORS)
     assert (tmp_path / "results.md").exists()
+
+
+@pytest.mark.parametrize("de,disc,verdict", [
+    ({"ci_low": 0.01, "estimate": 0.05}, {"estimate": -0.02}, "SUCCESS"),
+    ({"ci_low": 0.0, "estimate": 0.05}, {"estimate": -0.02}, "FAILURE"),   # interval touches 0
+    ({"ci_low": 0.01, "estimate": 0.05}, {"estimate": 0.0}, "FAILURE"),    # discrimination not in the same direction
+    ({"ci_low": -0.10, "estimate": -0.05}, {"estimate": 0.03}, "FAILURE"),
+])
+def test_claim_verdict_cases(de, disc, verdict):
+    assert report.claim_verdict(de, disc) == verdict
+
+
+def _fake_per_condition(root: Path, name: str, de: float, disc: float):
+    d = root / name
+    if not d.exists():
+        _fake_results(root, name, de)
+    rng = np.random.default_rng(1)
+    rows = [{"repeat": r, "split": s, "condition_id": f"c{i}", "de_pearson": de + 0.001 * rng.normal(), "disc_rank_global": disc}
+            for r in range(5) for s in ["random", "unseen_drug", "unseen_cell_line", "both_unseen"] for i in range(30)]
+    pd.DataFrame(rows).to_parquet(d / "per_condition.parquet")
+
+
+def test_claim_section_renders_first(tmp_path):
+    _fake_per_condition(tmp_path, "ridge", 0.60, 0.30)
+    _fake_per_condition(tmp_path, "neural", 0.70, 0.20)
+    _fake_per_condition(tmp_path, "neural_nocell", 0.65, 0.25)
+    md = report.render_results(tmp_path, CFG)
+    assert md.index("## Pre-registered claim") < md.index("## de_pearson")
+    claim = md.split("## Pre-registered claim")[1].split("\n## ")[0]
+    assert "**SUCCESS**" in claim
+    abl = next(line for line in claim.splitlines() if line.startswith("| neural |"))
+    assert "0.050" in abl  # neural − neural_nocell
+    assert next(line for line in claim.splitlines() if line.startswith("| ridge |")).count("—") == 4
+
+
+def test_claim_without_ablation(tmp_path):
+    _fake_per_condition(tmp_path, "ridge", 0.60, 0.30)
+    _fake_per_condition(tmp_path, "neural", 0.60, 0.30)
+    claim = report.render_results(tmp_path, CFG).split("## Pre-registered claim")[1].split("\n## ")[0]
+    assert "**FAILURE**" in claim and "—" in claim
+
+
+def test_claim_omitted_without_neural(tmp_path):
+    _fake_per_condition(tmp_path, "ridge", 0.60, 0.30)
+    assert "Pre-registered claim" not in report.render_results(tmp_path, CFG)
+
+
+def test_claim_states_mps_nondeterminism(tmp_path):
+    _fake_per_condition(tmp_path, "ridge", 0.60, 0.30)
+    _fake_per_condition(tmp_path, "neural", 0.70, 0.20)
+    res = json.loads((tmp_path / "neural" / "results.json").read_text())
+    res["model_info"] = [{"repeat": 0, "split": "random", "device": "mps", "epochs": 3}]
+    (tmp_path / "neural" / "results.json").write_text(json.dumps(res))
+    claim = report.render_results(tmp_path, CFG).split("## Pre-registered claim")[1].split("\n## ")[0]
+    assert "trained on MPS" in claim and "last digits" in claim

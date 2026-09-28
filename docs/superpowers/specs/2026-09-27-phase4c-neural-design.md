@@ -32,12 +32,12 @@ scoring set.
 | N1 | **MLP on ridge's exact inputs** (`baselines.scalar_columns` + log1p Morgan counts, standardised on the fitting rows) | Same features as the bar (§11 "same features"); any gain comes from non-linearity, i.e. drug × cell interactions ridge cannot express (owner decision) | A structured encoder might do better; out of scope |
 | N2 | **Residual on the per-dose mean**, as ridge after B8 | Same floor as ridge: a network that learns nothing predicts `global_mean` | None |
 | N3 | Architecture: input → 512 → 512 → n_genes, ReLU, dropout after each hidden layer, linear output | Standard; width matters less than regularisation with ~74 training drugs | Under- or over-capacity |
-| N4 | Loss MSE over all genes; AdamW, lr 1e-3, batch 256, ≤ 50 epochs, early stopping on val median `de_pearson` with patience 5 | Val metric = the headline metric, as ridge's α (B5) | Other losses might favour DE genes more |
-| N5 | **Search per fit** over 4 configs: dropout {0.2, 0.5} × weight decay {1e-4, 1e-2}; best val `de_pearson` wins (ties → larger weight decay, then larger dropout); refit on train + val for the chosen config's best epoch count | Repeats redraw splits, so one repeat's val can be another's test: tuning once per split and reusing it would let test data steer selection (§2.3). Per fit mirrors ridge's per-fit α. 4 configs vs ridge's 17 α values is comparable effort for the §11 parity rule | A wider search could find a better config; budget-limited (owner: ≤ 1 h) |
+| N4 | Loss MSE over all genes; AdamW, lr 1e-3, batch 256, ≤ 200 epochs (raised from 50, see N9), early stopping on val median `de_pearson` with patience 5 | Val metric = the headline metric, as ridge's α (B5) | Other losses might favour DE genes more |
+| N5 | **Search per fit** over 4 configs: dropout {0.2, 0.5} × weight decay {1e-4, 1e-2}; best val `de_pearson` wins (ties → larger weight decay, then larger dropout); refit on train + val for the chosen config's best epoch count | Repeats redraw splits, so one repeat's val can be another's test: tuning once per split and reusing it would let test data steer selection (§2.3). Per fit mirrors ridge's per-fit α. 4 configs vs ridge's 17 α values is comparable effort for the §11 parity rule | A wider search could find a better config |
 | N6 | Ablation = same class with `use_cell_features: false`: drops `pc_*`, `dmg_*`, `hot_*`, `drv_*`; registered as `neural_nocell` and `ridge_nocell` | Answers §8's secondary question for both model families in one table (owner decision) | +~1 h compute |
 | N7 | PyTorch, trained on the M1 GPU (MPS) when available, else CPU; the device is recorded in `results.json` | Fits the 1 h budget; CPU alone is ~5× slower | MPS is not bit-reproducible (N8) |
 | N8 | Seeds from config (`torch.manual_seed`, numpy); MPS runs may differ in the last digits between runs, stated in the report; CPU runs are bit-identical and are what the tests check | `evaluation.md` §9 asks for reproducibility; the GPU cannot fully guarantee it | Last-digit differences on rerun |
-| N9 | **Test data touched once**: development and the timing probe use only train/val of one repeat × split; the real `make eval MODEL=neural` runs once, after the code is final. If the probe predicts > 1 h for both neural models, `max_epochs` is lowered before the real run, never after | §2.3 | A lower epoch cap could underfit |
+| N9 | **Test data touched once**: development and the timing probe use only train/val of one repeat × split; the real `make eval MODEL=neural` runs once, after the code is final. If the probe predicts > 1 h for both neural models, `max_epochs` is lowered before the real run, never after. *Ruling 2026-09-27 (owner):* the probe (train/val of repeat 0 only) showed `random` still improving at 50 epochs (val 0.843; 0.885 at convergence, epoch 140), so the owner lifted the 1 h budget and raised the cap to 200 — early stopping decides; recorded in `evaluation.md` A9 | §2.3 | Several hours of compute |
 
 ## 4. Components
 
@@ -87,7 +87,7 @@ Offline, tiny synthetic data, CPU:
 ## 8. Definition of done
 
 1. `make eval-all` runs all nine models and each passes the harness contracts.
-2. `neural` + `neural_nocell` take ≤ 1 h together; peak RSS < 6 GB per model.
+2. `neural` + `neural_nocell` trained to convergence (early stopping, cap 200 epochs; ~4.5 h, owner ruling N9); peak RSS < 6 GB per model.
 3. `reports/results.md` opens with the claim verdict and shows the ablation rows.
 4. `evaluation.md` §12 has the B8 entry.
 5. `make test` passes locally and in CI.

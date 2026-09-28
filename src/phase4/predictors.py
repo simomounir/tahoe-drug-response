@@ -33,7 +33,7 @@ class DummyPredictor:
         return np.zeros((len(conditions), self.n_genes), dtype=np.float32)
 
 
-from phase4 import baselines  # noqa: E402  (baselines only type-hints TrainData, so no import cycle)
+from phase4 import baselines, neural  # noqa: E402  (both only type-hint TrainData, so no import cycle)
 
 PREDICTORS: dict[str, type] = {
     "dummy": DummyPredictor,
@@ -42,4 +42,7 @@ PREDICTORS: dict[str, type] = {
     "cell_mean": baselines.CellMean,
     "nearest_chemical": baselines.NearestChemical,
     "ridge": baselines.RidgeBaseline,
+    "ridge_nocell": baselines.RidgeBaseline,  # use_cell_features: false in configs/eval.yaml (phase 4c N6)
+    "neural": neural.NeuralPredictor,
+    "neural_nocell": neural.NeuralPredictor,
 }
