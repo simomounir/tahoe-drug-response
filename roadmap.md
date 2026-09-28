@@ -89,5 +89,8 @@ rather than letting phase 1 expand into it.
 - [x] Phase 2 — native arm64 `.venv` (identical outputs, rebuild 530 s → 344 s median);
   baseline with method in [`docs/performance_baseline.md`](docs/performance_baseline.md).
 - [x] Phase 3 — features for 13,071/13,772 conditions (drugs: RDKit fingerprints + descriptors, similarity groups; cells: DepMap 24Q4 PCA + mutation/driver flags), `make features` with contracts; target cross-checked against Tahoe DESeq2 (197/200, median sign agreement 1.00); evaluation rules amended (A1–A7). Spec [`docs/superpowers/specs/2026-09-26-phase3-features-design.md`](docs/superpowers/specs/2026-09-26-phase3-features-design.md).
-- [ ] Phase 4
+- [x] Phase 4 — harness (4 splits × 5 repeats, bootstrap intervals, `make eval-all`), baseline ladder and a conditional MLP.
+  **Pre-registered claim: FAILURE** — on `both_unseen` neural, ridge and the per-dose mean all score 0.666 `de_pearson`
+  (neural − ridge 0.000 [−0.001, 0.002]); ridge beats the MLP on every split. Evaluation amendments A8–A9 logged.
+  Specs: `docs/superpowers/specs/2026-09-27-phase4{a-harness,b-baselines,c-neural}-design.md`.
 - [ ] Phase 5
