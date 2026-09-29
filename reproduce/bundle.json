@@ -1,0 +1,17 @@
+{
+ "tag": "bundle-v1",
+ "version": "v1",
+ "git_commit": "97571312d8c5ac2ff773398c6ffbbe64f4702593",
+ "assets": {
+  "level1.zip": {
+   "url": "https://github.com/simomounir/tahoe-drug-response/releases/download/bundle-v1/level1.zip",
+   "sha256": "79ceaf9df1cb3c78e767e6cd21b4114706b930f9048d6badfd256fb3ad90665c",
+   "bytes": 11944630
+  },
+  "level2.zip": {
+   "url": "https://github.com/simomounir/tahoe-drug-response/releases/download/bundle-v1/level2.zip",
+   "sha256": "bdb96b749665bcae9fffa4c22f6797574cef4382da89cd8ccb1644d4f83471df",
+   "bytes": 844555677
+  }
+ }
+}
