@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study
+.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study bundle reproduce reproduce-refit bundle-upload
 
 test:
 	python -m pytest -q
@@ -51,3 +51,16 @@ results:
 # Phase 5a case study page (docs/superpowers/specs/2026-09-28-phase5a-case-study-design.md); needs make eval-all results.
 case-study:
 	python scripts/build_case_study.py
+
+# Phase 5b reproduction bundle (docs/superpowers/specs/2026-09-29-phase5b-reproduction-design.md).
+BUNDLE_VERSION ?= v1
+bundle:
+	python scripts/build_bundle.py --version $(BUNDLE_VERSION)
+reproduce:
+	python scripts/reproduce.py
+
+reproduce-refit:
+	python scripts/reproduce.py --refit
+# Creates a DRAFT release only (needs GITHUB_TOKEN); the owner publishes it on GitHub.
+bundle-upload:
+	python scripts/upload_release.py --version $(BUNDLE_VERSION)

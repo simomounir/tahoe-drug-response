@@ -93,12 +93,14 @@ def _train(x: np.ndarray, y: np.ndarray, dropout: float, weight_decay: float, p:
 
 class NeuralPredictor:
     def __init__(self, hidden: int, dropouts: list[float], weight_decays: list[float], lr: float, batch_size: int,
-                 max_epochs: int, patience: int, seed: int, use_cell_features: bool = True, device: str | None = None):
+                 max_epochs: int, patience: int, seed: int, use_cell_features: bool = True, device: str | None = None,
+                 fixed: dict | None = None):
         self.p = _Params(hidden, lr, batch_size, max_epochs, patience, seed)
         # Tie order (N5): larger weight decay first, then larger dropout; a later config must beat strictly.
         self.configs = sorted(((d, w) for d in dropouts for w in weight_decays), key=lambda c: (-c[1], -c[0]))
         self.use_cell_features = use_cell_features
         self.device = pick_device(device)
+        self.fixed = fixed  # {"dropout", "weight_decay", "epochs"}: skip the search, e.g. to refit a recorded choice (phase 5b R6)
 
     def fit(self, train: TrainData) -> None:
         is_val = np.asarray(train.part) == "val"
@@ -108,6 +110,11 @@ class NeuralPredictor:
         x = design_matrix(train.features, self.cols)
         y = np.asarray(train.targets, dtype=np.float32)
 
+        if self.fixed is not None:
+            self.dropout, self.weight_decay, self.epochs = self.fixed["dropout"], self.fixed["weight_decay"], self.fixed["epochs"]
+            self.val_de_pearson = float(self.fixed.get("val_de_pearson", float("nan")))
+            self._refit(train, x, y)
+            return
         tr = _subset(train, ~is_val)
         base = GlobalMean()
         base.fit(tr)
@@ -121,7 +128,9 @@ class NeuralPredictor:
             if best is None or s > best[3]:
                 best = (dropout, wd, epochs, s)
         self.dropout, self.weight_decay, self.epochs, self.val_de_pearson = best
+        self._refit(train, x, y)
 
+    def _refit(self, train: TrainData, x: np.ndarray, y: np.ndarray) -> None:
         self.base = GlobalMean()
         self.base.fit(train)
         self.std = Standardizer(x)

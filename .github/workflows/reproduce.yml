@@ -1,0 +1,44 @@
+name: reproduce
+
+# Monthly check that the published headline still reproduces (phase 5b spec R8).
+# Level 1 (statistics from the bundle's saved scores) on schedule; level 2 (refit on CPU) only on demand.
+# Note: GitHub pauses scheduled workflows after 60 days without repository activity; re-enable under Actions.
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+    inputs:
+      refit:
+        description: "Also run level 2 (refit the claim's models on CPU, ~800 MB download)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU-only PyTorch
+        run: pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Tests
+        run: make test
+      - name: Bundle not published yet
+        if: ${{ hashFiles('reproduce/bundle.json') == '' }}
+        run: echo "::notice::reproduce/bundle.json not committed yet; skipping the reproduction steps"
+      - name: Reproduce level 1
+        if: ${{ hashFiles('reproduce/bundle.json') != '' }}
+        run: make reproduce
+      - name: Reproduce level 2 (refit)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.refit && hashFiles('reproduce/bundle.json') != '' }}
+        timeout-minutes: 90
+        run: make reproduce-refit

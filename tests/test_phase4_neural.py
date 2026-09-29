@@ -133,3 +133,19 @@ def test_neural_all_nan_val_scores_do_not_crash():
     model = _fit(f, y, part, val_score=lambda p: float("nan"), max_epochs=3, patience=2)
     assert model.info()["epochs"] == 1
     assert np.isfinite(model.predict(f.head(3))).all()
+
+
+def test_neural_fixed_skips_search(monkeypatch):
+    f, y, part = _data()
+    calls = []
+    real = neural._train
+
+    def spy(*args, **kw):
+        calls.append(kw.get("epochs"))
+        return real(*args, **kw)
+
+    monkeypatch.setattr(neural, "_train", spy)
+    model = _fit(f, y, part, fixed={"dropout": 0.1, "weight_decay": 1e-2, "epochs": 3})
+    assert calls == [3]
+    info = model.info()
+    assert (info["dropout"], info["weight_decay"], info["epochs"]) == (0.1, 1e-2, 3)
