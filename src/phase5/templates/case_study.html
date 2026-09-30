@@ -145,7 +145,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 56px 0 0; }
   <h2 id="limits">Amendments and limitations</h2>
   <p>Changes to the evaluation rules, each logged with the old rule and the reason:</p>
   $amendments_html
-  <p>What this does not show: the slice covers $n_drugs drugs from Tahoe plates 1–3, one dataset and one cell-level aggregation (pseudobulk). With so few distinct drugs a model has little chemistry to generalise from; a larger or more diverse compound set could change the answer.</p>
+  <p>What this does not show: the slice covers $n_drugs drugs from Tahoe plates 1–3, one dataset and one cell-level aggregation (pseudobulk). With so few distinct drugs a model has little chemistry to generalise from; a larger or more diverse compound set could change the answer. Neural-network results were trained on an Apple GPU, whose arithmetic changed with a later operating-system update: refits now differ per condition (typically by about 0.01 in DE-gene Pearson), while split-level results agree within 0.002.</p>
 </section>
 
 <section aria-labelledby="repro">

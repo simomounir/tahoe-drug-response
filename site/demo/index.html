@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drug Response Explorer</title>
+<meta name="description" content="Pick a cancer cell line, a drug and a dose, and compare the measured expression change with what each model predicted when that condition was held out.">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fcfcfb; --surface: #f3f2ee; --text: #0b0b0b; --text-2: #52514e; --muted: #6f6e69;
+  --line: #e1e0d9; --grid: #e1e0d9; --accent: #2a78d6;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a19; --surface: #232322; --text: #ffffff; --text-2: #c3c2b7; --muted: #9a998f;
+    --line: #2c2c2a; --grid: #2c2c2a; --accent: #3987e5;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a19; --surface: #232322; --text: #ffffff; --text-2: #c3c2b7; --muted: #9a998f;
+  --line: #2c2c2a; --grid: #2c2c2a; --accent: #3987e5;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 880px; margin: 0 auto; padding: 40px 16px 72px; }
+h1 { font-size: clamp(24px, 4.5vw, 34px); line-height: 1.2; margin: 6px 0 12px; }
+p { color: var(--text-2); }
+a { color: var(--accent); }
+.eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+.controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 24px 0 12px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+select, button { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+button { cursor: pointer; }
+.splits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }
+.splits button[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 600; }
+.row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.row button { width: auto; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; }
+.card h2 { font-size: 18px; margin: 0 0 4px; }
+.card p { margin: 4px 0; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--muted); font-weight: 600; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: baseline; }
+#chart svg { display: block; width: 100%; height: auto; color: var(--text-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--text-2); margin: 8px 0; }
+.note { font-size: 14px; color: var(--muted); }
+details { margin-top: 8px; font-size: 14px; }
+summary { cursor: pointer; color: var(--accent); }
+@media (max-width: 560px) { .controls { grid-template-columns: 1fr; } .splits { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Interactive demo · drug response on Tahoe-100M</p>
+  <h1>Pick a condition. See what each model predicted.</h1>
+  <p>Choose a cancer cell line, a drug and a dose, then a split. The chart shows the measured expression change on that condition's most strongly changed genes, next to the predictions the per-dose mean, ridge regression and a neural network made while the condition was held out. The full result is in the <a href="../case-study/">case study</a>.</p>
+
+  <div class="controls">
+    <div><label for="line">Cell line</label><select id="line"></select></div>
+    <div><label for="drug">Drug</label><select id="drug"></select></div>
+    <div><label for="dose">Dose</label><select id="dose"></select></div>
+  </div>
+  <div class="splits" role="group" aria-label="Split" id="splits"></div>
+  <div class="row"><p class="note" id="split-note"></p><button id="random" type="button">Random condition</button></div>
+
+  <section class="card">
+    <h2 id="title" aria-live="polite">Loading…</h2>
+    <p id="subtitle" aria-live="polite"></p>
+    <div class="table-wrap"><table id="scores"><thead><tr><th scope="col">model</th><th scope="col">these predictions</th><th scope="col">evaluated run</th><th scope="col">median, this split</th></tr></thead><tbody></tbody></table></div>
+    <p class="note">DE-gene Pearson: correlation between predicted and measured change over the condition's differentially expressed genes (1 = perfect, 0 = none). The predictions shown were recomputed after the evaluation; for the neural network they can differ slightly from the evaluated run's (GPU arithmetic changes across OS versions), so both scores are given. Split-level results agree.</p>
+  </section>
+
+  <div class="legend" id="legend"></div>
+  <div id="chart"></div>
+  <div class="row"><p class="note" id="chart-note"></p><button id="all" type="button" aria-pressed="false">All DE genes</button></div>
+  <details><summary>Show the numbers</summary><div class="table-wrap"><table id="values"><thead></thead><tbody></tbody></table></div></details>
+</main>
+<script src="demo.js"></script>
+</body>
+</html>

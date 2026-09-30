@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study bundle reproduce reproduce-refit bundle-upload
+.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study bundle reproduce reproduce-refit bundle-upload demo-data
 
 test:
 	python -m pytest -q
@@ -64,3 +64,7 @@ reproduce-refit:
 # Creates a DRAFT release only (needs GITHUB_TOKEN); the owner publishes it on GitHub.
 bundle-upload:
 	python scripts/upload_release.py --version $(BUNDLE_VERSION)
+
+# Phase 5c demo data (docs/superpowers/specs/2026-09-29-phase5c-demo-design.md); refits every split, ~20-30 min.
+demo-data:
+	python scripts/build_demo_data.py
