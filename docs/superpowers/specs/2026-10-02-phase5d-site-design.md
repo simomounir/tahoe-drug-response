@@ -9,7 +9,7 @@ study in 60 seconds, and reproduce the headline number from the repo in under 10
 | # | Decision | Why |
 |---|---|---|
 | S1 | **Project site** at `simomounir.github.io/tahoe-drug-response`: landing page, case study, demo; author shown as the GitHub handle only | Owner decisions |
-| S2 | `make site` assembles `dist/site/` locally (landing generated from the results, the generated case study, the demo + its data, `.nojekyll`) and zips it to `site.zip` with `SITE_MANIFEST.json` (sha256) | Generated content and 71 MB of demo data never enter git |
+| S2 | `make site` assembles `dist/site-<version>/site/` locally (landing generated from the results, the generated case study, the demo + its data, `.nojekyll`) and zips it to `site.zip` with `SITE_MANIFEST.json` (sha256) | Generated content and 71 MB of demo data never enter git |
 | S3 | Published as a **draft release** `site-v<N>` by the existing upload script (`--kind site`); the owner publishes | Same reversible, owner-controlled pattern as the bundle |
 | S4 | `.github/workflows/pages.yml`: on a published `site-*` release (or manual dispatch with a tag), download `site.zip`, verify sha256, deploy with the official Pages actions. One-time owner step: Settings → Pages → Source "GitHub Actions" | Hosting free; deploy reproducible from a release |
 | S5 | Landing numbers and verdict come from `reproduce.headline` on the saved results; figure from `figures.degradation_svg`; shared nav (Home · Case study · Demo · GitHub) on all three pages | No hand-written numbers; one navigation |

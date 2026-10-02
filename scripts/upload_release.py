@@ -16,7 +16,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "simomounir/tahoe-drug-response"
-ASSETS = ["level1.zip", "level2.zip", "MANIFEST.json", "README.md"]
+KINDS = {  # tag prefix, release title, assets (files in the source directory)
+    "bundle": ("bundle", "Reproduction bundle", ["level1.zip", "level2.zip", "MANIFEST.json", "README.md"]),
+    "site": ("site", "Project site", ["site.zip", "SITE_MANIFEST.json"]),
+}
 TYPES = {".zip": "application/zip", ".json": "application/json", ".md": "text/markdown"}
 
 
@@ -49,18 +52,19 @@ def _check(status: int, payload: dict, what: str) -> dict:
     return payload
 
 
-def upload(bundle_dir: Path, version: str, repo: str, token: str | None, http=_http) -> str:
+def upload(bundle_dir: Path, version: str, repo: str, token: str | None, http=_http, kind: str = "bundle") -> str:
+    prefix, title, assets = KINDS[kind]
     if not token:
         raise UploadError("set GITHUB_TOKEN (fine-grained, Contents: read and write on the repository)")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     readme = (Path(bundle_dir) / "README.md").read_text(encoding="utf-8") if (Path(bundle_dir) / "README.md").exists() else ""
     release = _check(*http("POST", f"https://api.github.com/repos/{repo}/releases", headers,
-                           {"tag_name": f"bundle-{version}", "target_commitish": "main", "name": f"Reproduction bundle {version}",
+                           {"tag_name": f"{prefix}-{version}", "target_commitish": "main", "name": f"{title} {version}",
                             "body": readme, "draft": True}), "create draft release")
     if release.get("draft") is not True:
         raise UploadError(f"release {release.get('id')} is not a draft; stopping without uploading")
     base = release["upload_url"].split("{")[0]
-    for name in ASSETS:
+    for name in assets:
         path = Path(bundle_dir) / name
         _check(*http("POST", f"{base}?name={name}", {**headers, "Content-Type": TYPES[path.suffix]}, path), f"upload {name}")
         print(f"uploaded {name}", flush=True)
@@ -71,12 +75,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", default="v1")
     parser.add_argument("--repo", default=REPO)
+    parser.add_argument("--kind", choices=sorted(KINDS), default="bundle")
     args = parser.parse_args()
     try:
-        url = upload(ROOT / "dist" / f"bundle-{args.version}", args.version, args.repo, os.environ.get("GITHUB_TOKEN"))
+        url = upload(ROOT / "dist" / f"{KINDS[args.kind][0]}-{args.version}", args.version, args.repo, os.environ.get("GITHUB_TOKEN"), kind=args.kind)
     except UploadError as exc:
         sys.exit(f"upload: {exc}")
-    print(f"draft release created: {url}\nReview it on GitHub and click Publish; then run `python scripts/reproduce.py --write-bundle-json bundle-{args.version}` and commit reproduce/bundle.json.")
+    after = (f"then run `python scripts/reproduce.py --write-bundle-json bundle-{args.version}` and commit reproduce/bundle.json"
+             if args.kind == "bundle" else "publishing triggers the Pages deploy (pages.yml)")
+    print(f"draft release created: {url}\nReview it on GitHub and click Publish; {after}.")
 
 
 if __name__ == "__main__":

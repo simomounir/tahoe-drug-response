@@ -1,0 +1,50 @@
+name: pages
+
+# Deploy the project site from a published `site-*` release (phase 5d spec S4). The release carries site.zip, built
+# locally by `make site`; its sha256 is checked against the release's SITE_MANIFEST.json before deploying (this catches a
+# corrupted download, not a tampered release: both files come from the same release). To redeploy after editing a
+# published release's assets, run this workflow manually with the tag.
+# One-time setup: Settings → Pages → Source "GitHub Actions".
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Site release tag to deploy, e.g. site-v1"
+        required: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'site-') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Download and verify site.zip
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          [[ "$TAG" =~ ^site-v[0-9]+$ ]] || { echo "not a site release tag: $TAG"; exit 1; }
+          curl -fsSL -o site.zip "https://github.com/$REPO/releases/download/$TAG/site.zip"
+          curl -fsSL -o SITE_MANIFEST.json "https://github.com/$REPO/releases/download/$TAG/SITE_MANIFEST.json"
+          want=$(python3 -c "import json; print(json.load(open('SITE_MANIFEST.json'))['files']['site.zip']['sha256'])")
+          echo "$want  site.zip" | sha256sum -c -
+          mkdir site && unzip -q site.zip -d site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

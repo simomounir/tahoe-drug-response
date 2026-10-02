@@ -7,6 +7,8 @@ Given a compound and a cancer cell line, can a model predict how gene expression
 and cell lines it has never seen? This project builds pseudobulk drug responses from the Tahoe-100M single-cell atlas,
 fixes its evaluation rules before any model exists, and compares a neural network with a ladder of simple baselines.
 
+**Site:** https://simomounir.github.io/tahoe-drug-response/ — landing page, case study and interactive demo.
+
 **Result (pre-registered claim: FAILURE).** On new drugs in new cell lines, the neural network, ridge regression and
 the average response at each dose score the same (median DE-gene Pearson 0.666); ridge beats the neural network on
 every split. Details and figures: the case study (`make case-study` → `reports/case_study.html`).
@@ -17,6 +19,7 @@ every split. Details and figures: the case study (`make case-study` → `reports
 | Evaluation rules and amendments | [`evaluation.md`](evaluation.md) |
 | Design specs per phase | [`docs/superpowers/specs/`](docs/superpowers/specs/) |
 
+<a id="reproduce"></a>
 ## Reproduce
 
 Python 3.12 environment: `pip install -r requirements.txt`, then

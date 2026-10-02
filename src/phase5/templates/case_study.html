@@ -67,10 +67,14 @@ pre { background: var(--surface); border: 1px solid var(--line); border-radius: 
 .note { font-size: 14px; color: var(--muted); }
 hr { border: 0; border-top: 1px solid var(--line); margin: 56px 0 0; }
 @media (max-width: 520px) { .numbers { grid-template-columns: 1fr; } body { font-size: 16px; } }
+.site-nav { display: flex; gap: 18px; flex-wrap: wrap; font-size: 15px; padding: 0 0 24px; }
+.site-nav a { color: var(--text-2); text-decoration: none; }
+.site-nav a[aria-current="page"] { color: var(--text); font-weight: 600; }
 </style>
 </head>
 <body>
 <main>
+<nav class="site-nav" aria-label="Site"><a href="../">Home</a><a href="./" aria-current="page">Case study</a><a href="../demo/">Demo</a><a href="https://github.com/simomounir/tahoe-drug-response">GitHub</a></nav>
 <header>
   <p class="eyebrow">Case study · drug response on Tahoe-100M</p>
   <h1>Can a model predict how a new drug changes gene expression in a new cancer cell line?</h1>

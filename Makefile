@@ -1,4 +1,4 @@
-.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study bundle reproduce reproduce-refit bundle-upload demo-data
+.PHONY: test phase1 phase1-dry-run features eval-data eval eval-all results case-study bundle reproduce reproduce-refit bundle-upload demo-data site site-upload
 
 test:
 	python -m pytest -q
@@ -68,3 +68,12 @@ bundle-upload:
 # Phase 5c demo data (docs/superpowers/specs/2026-09-29-phase5c-demo-design.md); refits every split, ~20-30 min.
 demo-data:
 	python scripts/build_demo_data.py
+
+# Phase 5d project site (docs/superpowers/specs/2026-10-02-phase5d-site-design.md).
+SITE_VERSION ?= v1
+site: case-study
+	python scripts/build_site.py --version $(SITE_VERSION)
+
+# Creates a DRAFT release only (needs GITHUB_TOKEN); publishing it triggers the Pages deploy.
+site-upload:
+	python scripts/upload_release.py --kind site --version $(SITE_VERSION)

@@ -50,3 +50,21 @@ def test_upload_api_error(tmp_path):
 def test_upload_refuses_non_draft(tmp_path):
     with pytest.raises(upload.UploadError, match="not a draft"):
         upload.upload(_bundle(tmp_path), "v1", "o/r", "tok", http=lambda *a: (201, {"id": 1, "draft": False, "upload_url": "u{?name}"}))
+
+
+def test_upload_site_kind(tmp_path):
+    d = tmp_path / "site-v1"
+    d.mkdir()
+    for n in ["site.zip", "SITE_MANIFEST.json"]:
+        (d / n).write_bytes(b"x")
+    calls = []
+
+    def http(method, url, headers, body):
+        calls.append((url, body if isinstance(body, dict) else None))
+        if url.endswith("/releases"):
+            return 201, {"id": 1, "draft": True, "html_url": "h", "upload_url": "https://uploads/x/assets{?name}"}
+        return 201, {}
+
+    upload.upload(d, "v1", "o/r", "tok", http=http, kind="site")
+    assert calls[0][1]["tag_name"] == "site-v1" and calls[0][1]["draft"] is True
+    assert sorted(u.split("name=")[1] for u, _ in calls[1:]) == ["SITE_MANIFEST.json", "site.zip"]
