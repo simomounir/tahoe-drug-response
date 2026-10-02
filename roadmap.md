@@ -93,4 +93,7 @@ rather than letting phase 1 expand into it.
   **Pre-registered claim: FAILURE** — on `both_unseen` neural, ridge and the per-dose mean all score 0.666 `de_pearson`
   (neural − ridge 0.000 [−0.001, 0.002]); ridge beats the MLP on every split. Evaluation amendments A8–A9 logged.
   Specs: `docs/superpowers/specs/2026-09-27-phase4{a-harness,b-baselines,c-neural}-design.md`.
-- [ ] Phase 5
+- [x] Phase 5 — live at https://simomounir.github.io/tahoe-drug-response/ (landing page, generated case study,
+  interactive demo); `make reproduce` / `make reproduce-refit` check the headline against release `bundle-v1` in
+  seconds / ~2 min, and the monthly `reproduce` workflow re-checks it. Specs: `docs/superpowers/specs/2026-09-2*-phase5*`
+  and `2026-10-02-phase5d-site-design.md`.
